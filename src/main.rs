@@ -1,14 +1,26 @@
-mod duckdb_load;
-use duckdb_load::duckdb_transform;
+use std::fs::File;
+use std::io::{self, Read};
+use std::path::Path;
 
-fn main() {
-    println!("Starting DuckDB GeoPackage loader...");
+mod file_load;
 
-    let file_path = "/Users/christophercarlon/Downloads/GLA_High_Street_boundaries.gpkg";
-    match duckdb_transform(file_path) {
-        Ok(crs) => println!("{}", crs),
-        Err(e) => eprintln!("An error occurred: {}", e),
-    };
+fn main() -> io::Result<()> {
+    // Replace with the actual path to the file you're testing
+    let path =
+        Path::new("/Users/christophercarlon/Downloads/GLA_High_Street_boundaries_EPSG4326.gpkg");
 
-    println!("DuckDB GeoPackage loader finished.");
+    let mut file = File::open(path)?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+
+    match file_load::determine_file_type(&buffer) {
+        Ok(file_type) => {
+            println!("File type determined: {:?}", file_type);
+        }
+        Err(e) => {
+            println!("Failed to determine file type: {:?}", e);
+        }
+    }
+
+    Ok(())
 }
