@@ -1,25 +1,16 @@
-use std::fs::File;
-use std::io::{self, Read};
-use std::path::Path;
+mod duckdb_load;
 
-mod file_load;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Hardcoded file path for demonstration
+    // In a real application, you might want to make this configurable
+    let file_path = "tmp/GLA_High_Street_boundaries.gpkg";
 
-fn main() -> io::Result<()> {
-    // Replace with the actual path to the file you're testing
-    let path =
-        Path::new("/Users/christophercarlon/Downloads/GLA_High_Street_boundaries_EPSG4326.gpkg");
+    println!("Processing file: {}", file_path);
 
-    let mut file = File::open(path)?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
-
-    match file_load::determine_file_type(&buffer) {
-        Ok(file_type) => {
-            println!("File type determined: {:?}", file_type);
-        }
-        Err(e) => {
-            println!("Failed to determine file type: {:?}", e);
-        }
+    // Call the process_file function from the duckload module
+    match duckdb_load::process_file(file_path) {
+        Ok(_) => println!("File processed successfully."),
+        Err(e) => eprintln!("Error processing file: {}", e),
     }
 
     Ok(())
