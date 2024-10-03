@@ -66,6 +66,7 @@ fn query_and_print_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+// Load to postgis
 fn load_data_postgis(conn: &Connection) -> Result<(), Box<dyn Error>> {
     // Attach PostGIS database
     conn.execute(
