@@ -4,6 +4,7 @@ use duckdb::{Connection, Result};
 use std::fs::File;
 use std::io::{self, Read};
 
+// Enum to hold file types to match on
 #[derive(Debug, PartialEq)]
 pub enum FileType {
     Geopackage,
@@ -14,6 +15,7 @@ pub enum FileType {
     Parquet,
 }
 
+// Determine the file type that is being processed
 pub fn determine_file_type(file_content: &[u8]) -> io::Result<FileType> {
     let header = &file_content[0..16.min(file_content.len())];
     if &header[0..4] == b"PK\x03\x04" {
@@ -54,6 +56,7 @@ pub fn determine_file_type(file_content: &[u8]) -> io::Result<FileType> {
     }
 }
 
+// Get data schema
 fn query_and_print_schema(conn: &Connection, query: &str, limit: usize) -> Result<()> {
     let mut stmt = conn.prepare(&format!("{} LIMIT {}", query, limit))?;
     let arrow_result = stmt.query_arrow([])?;
@@ -79,23 +82,48 @@ fn query_and_print_schema(conn: &Connection, query: &str, limit: usize) -> Resul
     Ok(())
 }
 
-pub fn load_file_duckdb(file_path: &str) -> Result<()> {
+// DuckDB file loader
+pub fn load_file_duckdb(file_path: &str, file_type: &FileType) -> Result<()> {
     let conn = Connection::open_in_memory()?;
     conn.execute("INSTALL spatial;", [])?;
     conn.execute("LOAD spatial;", [])?;
 
-    let create_table_query = format!(
-        "CREATE TABLE geopackage_data AS SELECT * FROM ST_Read('{}');",
-        file_path
-    );
+    let create_table_query = match file_type {
+        FileType::Geopackage | FileType::Shapefile | FileType::Geojson => {
+            format!(
+                "CREATE TABLE data AS SELECT * FROM ST_Read('{}');",
+                file_path
+            )
+        }
+        FileType::Excel => {
+            format!(
+                "CREATE TABLE data AS SELECT * FROM read_excel('{}');",
+                file_path
+            )
+        }
+        FileType::Csv => {
+            format!(
+                "CREATE TABLE data AS SELECT * FROM read_csv_auto('{}');",
+                file_path
+            )
+        }
+        FileType::Parquet => {
+            format!(
+                "CREATE TABLE data AS SELECT * FROM parquet_scan('{}');",
+                file_path
+            )
+        }
+    };
+
     conn.execute(&create_table_query, [])?;
 
     // Call the private function to query and print record batches
-    query_and_print_schema(&conn, "SELECT * FROM geopackage_data", 5)?;
+    query_and_print_schema(&conn, "SELECT * FROM data", 5)?;
 
     Ok(())
 }
 
+// Process file
 pub fn process_file(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut file = File::open(file_path)?;
     let mut buffer = Vec::new();
@@ -104,13 +132,9 @@ pub fn process_file(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     match determine_file_type(&buffer) {
         Ok(file_type) => {
             println!("Detected file type: {:?}", file_type);
-            if file_type == FileType::Geopackage {
-                match load_file_duckdb(file_path) {
-                    Ok(_) => println!("Successfully loaded Geopackage into DuckDB"),
-                    Err(e) => println!("Error loading Geopackage into DuckDB: {}", e),
-                }
-            } else {
-                println!("File is not a Geopackage. Skipping DuckDB load.");
+            match load_file_duckdb(file_path, &file_type) {
+                Ok(_) => println!("Successfully loaded {:?} into DuckDB", file_type),
+                Err(e) => println!("Error loading {:?} into DuckDB: {}", file_type, e),
             }
         }
         Err(e) => println!("Error determining file type: {}", e),
