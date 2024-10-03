@@ -12,6 +12,12 @@ fn test_file_path(file_name: &str) -> String {
 }
 
 #[test]
+fn test_process_invalid_file() {
+    let file_path = test_file_path("invalid.txt");
+    assert!(process_file(&file_path).is_err());
+}
+
+#[test]
 fn test_process_geojson() {
     let file_path = test_file_path("hotosm_twn_populated_places_points_geojson.geojson");
     assert!(process_file(&file_path).is_ok());
@@ -46,9 +52,3 @@ fn test_process_geopackage() {
 //     let file_path = test_file_path("your_parquet_file.parquet");
 //     assert!(process_file(&file_path).is_ok());
 // }
-
-#[test]
-fn test_process_invalid_file() {
-    let file_path = test_file_path("invalid.txt");
-    assert!(process_file(&file_path).is_err());
-}
