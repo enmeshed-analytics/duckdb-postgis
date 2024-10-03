@@ -1,0 +1,13 @@
+services:
+  geodatabase:
+    image: postgis/postgis:16-3.4
+    container_name: gridwalk-geodatabase
+    platform: linux/amd64
+    volumes:
+      - ./local/postgresql/data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: gridwalk
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"

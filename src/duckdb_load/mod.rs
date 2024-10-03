@@ -1,6 +1,5 @@
-use duckdb::arrow::record_batch::RecordBatch;
-use duckdb::arrow::util::pretty::print_batches;
 use duckdb::{Connection, Result};
+use std::error::Error;
 use std::fs::File;
 use std::io::{self, Read};
 
@@ -16,7 +15,7 @@ pub enum FileType {
 }
 
 // Determine the file type that is being processed
-pub fn determine_file_type(file_content: &[u8]) -> io::Result<FileType> {
+fn determine_file_type(file_content: &[u8]) -> io::Result<FileType> {
     let header = &file_content[0..16.min(file_content.len())];
     if &header[0..4] == b"PK\x03\x04" {
         Ok(FileType::Excel)
@@ -57,36 +56,46 @@ pub fn determine_file_type(file_content: &[u8]) -> io::Result<FileType> {
 }
 
 // Get data schema
-fn query_and_print_schema(conn: &Connection, query: &str, limit: usize) -> Result<()> {
-    let mut stmt = conn.prepare(&format!("{} LIMIT {}", query, limit))?;
+fn query_and_print_schema(conn: &Connection) -> Result<()> {
+    let query = "SELECT * FROM data LIMIT 50";
+    let mut stmt = conn.prepare(query)?;
     let arrow_result = stmt.query_arrow([])?;
-
     // Get the schema
     let schema = arrow_result.get_schema();
     println!("Schema: {:?}", schema);
+    Ok(())
+}
 
-    // Collect RecordBatches
-    let rbs: Vec<RecordBatch> = arrow_result.collect();
+fn load_data_postgis(conn: &Connection) -> Result<(), Box<dyn Error>> {
+    // Attach PostGIS database
+    conn.execute(
+        "ATTACH 'dbname=gridwalk user=admin password=password host=localhost port=5432' AS gridwalk_db (TYPE POSTGRES)",
+        [],
+    )?;
 
-    // Calculate total number of rows
-    let total_rows: usize = rbs.iter().map(|rb| rb.num_rows()).sum();
+    // Drop the existing table if it exists
+    conn.execute("DROP TABLE IF EXISTS gridwalk_db.data_1", [])?;
 
-    // Print batches
-    match print_batches(&rbs) {
-        Ok(_) => println!("Successfully printed {} rows of data.", total_rows),
-        Err(e) => eprintln!("Error printing batches: {}", e),
-    }
+    // Create the new table structure
+    let create_table_query = "
+        CREATE TABLE gridwalk_db.data_1 AS
+        SELECT *,
+               geom::geometry AS geometry
+        FROM data;
+    ";
+    conn.execute(create_table_query, [])?;
 
-    println!("Total number of rows in the result: {}", total_rows);
-
+    println!("Table 'data_1' created and data inserted successfully");
     Ok(())
 }
 
 // DuckDB file loader
-pub fn load_file_duckdb(file_path: &str, file_type: &FileType) -> Result<()> {
+fn load_file_duckdb(file_path: &str, file_type: &FileType) -> Result<()> {
     let conn = Connection::open_in_memory()?;
     conn.execute("INSTALL spatial;", [])?;
     conn.execute("LOAD spatial;", [])?;
+    conn.execute("INSTALL postgres;", [])?;
+    conn.execute("LOAD postgres;", [])?;
 
     let create_table_query = match file_type {
         FileType::Geopackage | FileType::Shapefile | FileType::Geojson => {
@@ -115,10 +124,17 @@ pub fn load_file_duckdb(file_path: &str, file_type: &FileType) -> Result<()> {
         }
     };
 
+    // Create the table in DuckDB
     conn.execute(&create_table_query, [])?;
 
-    // Call the private function to query and print record batches
-    query_and_print_schema(&conn, "SELECT * FROM data", 5)?;
+    // Call to query and print data schema
+    query_and_print_schema(&conn)?;
+
+    // Call to load data into postgres and handle the result
+    match load_data_postgis(&conn) {
+        Ok(_) => println!("Data successfully loaded into PostgreSQL"),
+        Err(e) => eprintln!("Error loading data into PostgreSQL: {}", e),
+    }
 
     Ok(())
 }
