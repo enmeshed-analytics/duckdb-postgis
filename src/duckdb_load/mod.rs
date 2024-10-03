@@ -124,20 +124,21 @@ pub fn load_file_duckdb(file_path: &str, file_type: &FileType) -> Result<()> {
 }
 
 // Process file
-pub fn process_file(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn process_file(file_path: &str) -> io::Result<()> {
     let mut file = File::open(file_path)?;
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
 
-    match determine_file_type(&buffer) {
-        Ok(file_type) => {
-            println!("Detected file type: {:?}", file_type);
-            match load_file_duckdb(file_path, &file_type) {
-                Ok(_) => println!("Successfully loaded {:?} into DuckDB", file_type),
-                Err(e) => println!("Error loading {:?} into DuckDB: {}", file_type, e),
-            }
-        }
-        Err(e) => println!("Error determining file type: {}", e),
-    }
+    let file_type = determine_file_type(&buffer)?;
+    println!("Detected file type: {:?}", file_type);
+
+    load_file_duckdb(file_path, &file_type).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("Error loading {:?} into DuckDB: {}", file_type, e),
+        )
+    })?;
+
+    println!("Successfully loaded {:?} into DuckDB", file_type);
     Ok(())
 }

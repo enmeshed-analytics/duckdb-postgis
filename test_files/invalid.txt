@@ -1,1 +1,1 @@
-invalid file for testing
+test file
