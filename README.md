@@ -1,1 +1,3 @@
 # Rust lib for GridWalk Backend
+
+What does this lib need to do...

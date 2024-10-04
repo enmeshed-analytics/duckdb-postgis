@@ -57,7 +57,7 @@ fn determine_file_type(file_content: &[u8]) -> io::Result<FileType> {
 
 // Get data schema
 fn query_and_print_schema(conn: &Connection) -> Result<()> {
-    let query = "SELECT * FROM data LIMIT 50";
+    let query = "SELECT * FROM data LIMIT 10";
     let mut stmt = conn.prepare(query)?;
     let arrow_result = stmt.query_arrow([])?;
     // Get the schema
@@ -67,31 +67,59 @@ fn query_and_print_schema(conn: &Connection) -> Result<()> {
 }
 
 // Load to postgis
-fn load_data_postgis(conn: &Connection) -> Result<(), Box<dyn Error>> {
+fn load_data_postgis(conn: &Connection, table_name: &str) -> Result<(), Box<dyn Error>> {
     // Attach PostGIS database
     conn.execute(
         "ATTACH 'dbname=gridwalk user=admin password=password host=localhost port=5432' AS gridwalk_db (TYPE POSTGRES)",
         [],
     )?;
 
-    // Drop the existing table if it exists
-    conn.execute("DROP TABLE IF EXISTS gridwalk_db.data_1", [])?;
+    // Let table name
+    let my_table_name = table_name;
 
-    // Create the new table structure
-    let create_table_query = "
-        CREATE TABLE gridwalk_db.data_1 AS
-        SELECT *,
-               geom::geometry AS geometry
+    // Drop Table
+    let delete_if_table_exists_query = &format!(
+        "
+        DROP TABLE IF EXISTS gridwalk_db.{};
+    ",
+        my_table_name
+    );
+
+    conn.execute(delete_if_table_exists_query, [])?;
+
+    // Create Table
+    let create_table_query = &format!(
+        "
+        CREATE TABLE gridwalk_db.{} AS
+        SELECT *
         FROM data;
-    ";
+    ",
+        my_table_name
+    );
+
     conn.execute(create_table_query, [])?;
 
-    println!("Table 'data_1' created and data inserted successfully");
+    // Postgis Update Table
+    let postgis_query = &format!(
+        "CALL postgres_execute('gridwalk_db', '
+        ALTER TABLE {} ADD COLUMN geom geometry;
+        UPDATE {} SET geom = ST_GeomFromText(geom_wkt, 4326);
+        ALTER TABLE {} DROP COLUMN geom_wkt;
+        ');",
+        table_name, table_name, table_name
+    );
+
+    conn.execute(&postgis_query, [])?;
+
+    println!(
+        "Table {} created and data inserted successfully",
+        my_table_name
+    );
     Ok(())
 }
 
 // DuckDB file loader
-fn load_file_duckdb(file_path: &str, file_type: &FileType) -> Result<()> {
+fn process_file(file_path: &str, file_type: &FileType) -> Result<()> {
     let conn = Connection::open_in_memory()?;
     conn.execute("INSTALL spatial;", [])?;
     conn.execute("LOAD spatial;", [])?;
@@ -101,19 +129,22 @@ fn load_file_duckdb(file_path: &str, file_type: &FileType) -> Result<()> {
     let create_table_query = match file_type {
         FileType::Geopackage | FileType::Shapefile | FileType::Geojson => {
             format!(
-                "CREATE TABLE data AS SELECT * FROM ST_Read('{}');",
+                "CREATE TABLE data AS
+                 SELECT * EXCLUDE (geom),
+                 ST_AsText(geom) as geom_wkt
+                 FROM ST_Read('{}');",
                 file_path
             )
         }
         FileType::Excel => {
             format!(
-                "CREATE TABLE data AS SELECT * FROM read_excel('{}');",
+                "CREATE TABLE data AS SELECT * FROM st_read('{}');",
                 file_path
             )
         }
         FileType::Csv => {
             format!(
-                "CREATE TABLE data AS SELECT * FROM read_csv_auto('{}');",
+                "CREATE TABLE data AS SELECT * FROM read_csv('{}');",
                 file_path
             )
         }
@@ -132,7 +163,7 @@ fn load_file_duckdb(file_path: &str, file_type: &FileType) -> Result<()> {
     query_and_print_schema(&conn)?;
 
     // Call to load data into postgres and handle the result
-    match load_data_postgis(&conn) {
+    match load_data_postgis(&conn, "pop_tart") {
         Ok(_) => println!("Data successfully loaded into PostgreSQL"),
         Err(e) => eprintln!("Error loading data into PostgreSQL: {}", e),
     }
@@ -141,7 +172,7 @@ fn load_file_duckdb(file_path: &str, file_type: &FileType) -> Result<()> {
 }
 
 // Process file
-pub fn process_file(file_path: &str) -> io::Result<()> {
+pub fn launch_process_file(file_path: &str) -> io::Result<()> {
     let mut file = File::open(file_path)?;
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
@@ -149,7 +180,7 @@ pub fn process_file(file_path: &str) -> io::Result<()> {
     let file_type = determine_file_type(&buffer)?;
     println!("Detected file type: {:?}", file_type);
 
-    load_file_duckdb(file_path, &file_type).map_err(|e| {
+    process_file(file_path, &file_type).map_err(|e| {
         io::Error::new(
             io::ErrorKind::Other,
             format!("Error loading {:?} into DuckDB: {}", file_type, e),

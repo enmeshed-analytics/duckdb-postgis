@@ -1,4 +1,4 @@
-use duckdb_transformer::duckdb_load::process_file;
+use duckdb_transformer::duckdb_load::launch_process_file;
 
 #[cfg(test)]
 mod tests {
@@ -13,7 +13,7 @@ mod tests {
         assert!(Path::new(file_path).exists(), "Test file does not exist");
 
         // Process the file
-        let result = process_file(file_path);
+        let result = launch_process_file(file_path);
 
         // Check if the processing was successful
         assert!(
