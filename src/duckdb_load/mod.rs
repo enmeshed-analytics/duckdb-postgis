@@ -92,7 +92,7 @@ fn load_data_postgis(conn: &Connection, table_name: &str) -> Result<(), Box<dyn 
         "
         CREATE TABLE gridwalk_db.{} AS
         SELECT *
-        FROM data;
+        FROM transformed_data;
     ",
         my_table_name
     );
@@ -130,8 +130,7 @@ fn process_file(file_path: &str, file_type: &FileType) -> Result<()> {
         FileType::Geopackage | FileType::Shapefile | FileType::Geojson => {
             format!(
                 "CREATE TABLE data AS
-                 SELECT * EXCLUDE (geom),
-                 ST_AsText(geom) as geom_wkt
+                 SELECT *
                  FROM ST_Read('{}');",
                 file_path
             )
@@ -162,13 +161,85 @@ fn process_file(file_path: &str, file_type: &FileType) -> Result<()> {
     // Call to query and print data schema
     query_and_print_schema(&conn)?;
 
+    // Transform
+    duckdb_transform(&conn, file_path)?;
+
     // Call to load data into postgres and handle the result
-    match load_data_postgis(&conn, "pop_tart") {
+    match load_data_postgis(&conn, "lllllll") {
         Ok(_) => println!("Data successfully loaded into PostgreSQL"),
         Err(e) => eprintln!("Error loading data into PostgreSQL: {}", e),
     }
 
     Ok(())
+}
+
+fn get_crs_number(conn: &Connection, file_path: &str) -> Result<String, duckdb::Error> {
+    let query = format!(
+        "SELECT layers[1].geometry_fields[1].crs.auth_code AS crs_number FROM st_read_meta('{}');",
+        file_path
+    );
+    let mut stmt = conn.prepare(&query)?;
+    let mut rows = stmt.query([])?;
+    if let Some(row) = rows.next()? {
+        let crs_number: String = row.get(0)?;
+        Ok(crs_number)
+    } else {
+        Ok("CRS number not found".to_string())
+    }
+}
+
+fn transform_crs(
+    conn: &Connection,
+    file_path: &str,
+    target_crs: &str,
+) -> Result<String, duckdb::Error> {
+    // Get the current CRS
+    let current_crs = get_crs_number(conn, file_path)?;
+    println!("Current CRS: {}", current_crs);
+
+    // Check if the CRS is already the target CRS
+    if current_crs == target_crs {
+        // Create the transformed_data table without transformation
+        let create_table_query = "
+            CREATE TABLE transformed_data AS
+            SELECT
+                *,
+                ST_AsText(geom) as geom_wkt
+            FROM data;
+        ";
+        conn.execute(create_table_query, [])?;
+    } else {
+        // Create the transformed_data table with transformation
+        let create_table_query = format!(
+            "CREATE TABLE transformed_data AS
+             SELECT
+                *,
+                ST_AsText(ST_Transform(geom, 'EPSG:{}', 'EPSG:{}', always_xy := true)) AS geom_wkt,
+             FROM data;",
+            current_crs, target_crs
+        );
+        conn.execute(&create_table_query, [])?;
+    }
+
+    // Drop the original geom column
+    let drop_column_query = "ALTER TABLE transformed_data DROP COLUMN geom;";
+    conn.execute(drop_column_query, [])?;
+
+    if current_crs == target_crs {
+        Ok(format!(
+            "CRS is already {}. Geometry converted to WKT and original geom column dropped.",
+            target_crs
+        ))
+    } else {
+        Ok(format!(
+            "Transformation from EPSG:{} to EPSG:{} completed. Geometry converted to WKT and original geom column dropped.",
+            current_crs, target_crs
+        ))
+    }
+}
+
+fn duckdb_transform(conn: &Connection, file_path: &str) -> Result<String, duckdb::Error> {
+    transform_crs(conn, file_path, "4326")
 }
 
 // Process file
