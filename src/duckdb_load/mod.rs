@@ -118,61 +118,6 @@ fn load_data_postgis(conn: &Connection, table_name: &str) -> Result<(), Box<dyn 
     Ok(())
 }
 
-// DuckDB file loader
-fn process_file(file_path: &str, file_type: &FileType) -> Result<()> {
-    let conn = Connection::open_in_memory()?;
-    conn.execute("INSTALL spatial;", [])?;
-    conn.execute("LOAD spatial;", [])?;
-    conn.execute("INSTALL postgres;", [])?;
-    conn.execute("LOAD postgres;", [])?;
-
-    let create_table_query = match file_type {
-        FileType::Geopackage | FileType::Shapefile | FileType::Geojson => {
-            format!(
-                "CREATE TABLE data AS
-                 SELECT *
-                 FROM ST_Read('{}');",
-                file_path
-            )
-        }
-        FileType::Excel => {
-            format!(
-                "CREATE TABLE data AS SELECT * FROM st_read('{}');",
-                file_path
-            )
-        }
-        FileType::Csv => {
-            format!(
-                "CREATE TABLE data AS SELECT * FROM read_csv('{}');",
-                file_path
-            )
-        }
-        FileType::Parquet => {
-            format!(
-                "CREATE TABLE data AS SELECT * FROM parquet_scan('{}');",
-                file_path
-            )
-        }
-    };
-
-    // Create the table in DuckDB
-    conn.execute(&create_table_query, [])?;
-
-    // Call to query and print data schema
-    query_and_print_schema(&conn)?;
-
-    // Transform
-    duckdb_transform(&conn, file_path)?;
-
-    // Call to load data into postgres and handle the result
-    match load_data_postgis(&conn, "lllllll") {
-        Ok(_) => println!("Data successfully loaded into PostgreSQL"),
-        Err(e) => eprintln!("Error loading data into PostgreSQL: {}", e),
-    }
-
-    Ok(())
-}
-
 fn get_crs_number(conn: &Connection, file_path: &str) -> Result<String, duckdb::Error> {
     let query = format!(
         "SELECT layers[1].geometry_fields[1].crs.auth_code AS crs_number FROM st_read_meta('{}');",
@@ -240,6 +185,61 @@ fn transform_crs(
 
 fn duckdb_transform(conn: &Connection, file_path: &str) -> Result<String, duckdb::Error> {
     transform_crs(conn, file_path, "4326")
+}
+
+// DuckDB file loader
+fn process_file(file_path: &str, file_type: &FileType) -> Result<()> {
+    let conn = Connection::open_in_memory()?;
+    conn.execute("INSTALL spatial;", [])?;
+    conn.execute("LOAD spatial;", [])?;
+    conn.execute("INSTALL postgres;", [])?;
+    conn.execute("LOAD postgres;", [])?;
+
+    let create_table_query = match file_type {
+        FileType::Geopackage | FileType::Shapefile | FileType::Geojson => {
+            format!(
+                "CREATE TABLE data AS
+                 SELECT *
+                 FROM ST_Read('{}');",
+                file_path
+            )
+        }
+        FileType::Excel => {
+            format!(
+                "CREATE TABLE data AS SELECT * FROM st_read('{}');",
+                file_path
+            )
+        }
+        FileType::Csv => {
+            format!(
+                "CREATE TABLE data AS SELECT * FROM read_csv('{}');",
+                file_path
+            )
+        }
+        FileType::Parquet => {
+            format!(
+                "CREATE TABLE data AS SELECT * FROM parquet_scan('{}');",
+                file_path
+            )
+        }
+    };
+
+    // Create the table in DuckDB
+    conn.execute(&create_table_query, [])?;
+
+    // Call to query and print data schema
+    query_and_print_schema(&conn)?;
+
+    // Transform
+    duckdb_transform(&conn, file_path)?;
+
+    // Call to load data into postgres and handle the result
+    match load_data_postgis(&conn, "lllllll") {
+        Ok(_) => println!("Data successfully loaded into PostgreSQL"),
+        Err(e) => eprintln!("Error loading data into PostgreSQL: {}", e),
+    }
+
+    Ok(())
 }
 
 // Process file
