@@ -142,7 +142,7 @@ fn get_crs_number(conn: &Connection, file_path: &str) -> Result<String> {
     }
 }
 
-// Transform the CRS and create transformed_data table in duckdb for table for later use in PostGIS
+// Transform the CRS and create transformed_data table in duckdb for later use in PostGIS
 fn transform_crs(conn: &Connection, file_path: &str, target_crs: &str) -> Result<String> {
     // Get the current CRS
     let current_crs = get_crs_number(conn, file_path)?;
