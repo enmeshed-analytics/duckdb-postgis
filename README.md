@@ -1,5 +1,7 @@
 # Rust lib for GridWalk Backend
 
+This DuckDB library serves as a data transformation layer in the Gridwalk architecture.
+
 ## Current v0.1.0 release notes
 
 ### This Rust library does the following things
