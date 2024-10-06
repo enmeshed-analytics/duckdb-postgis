@@ -228,7 +228,7 @@ impl DuckDBFileProcessor {
             ');",
             table_name, table_name, table_name
         );
-        self.conn.execute(&postgis_query, [])?;
+        self.conn.execute(postgis_query, [])?;
 
         println!(
             "Table {} created and data inserted successfully",
