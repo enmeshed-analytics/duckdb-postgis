@@ -1,7 +1,15 @@
 [package]
-name = "duckdb-transformer"
-version = "0.1.0"
+name = "duckdb-postgis"
+version = "0.1.1"
 edition = "2021"
+authors = ["chris@enmeshed.dev", "serj@enmeshed.dev"]
+description = "A library for transforming geospatial data using DuckDB and ingesting into a PostGIS database."
+license = "MIT"
+repository = "https://github.com/enmeshed-analytics/duckdb-gridwalk"
+homepage = "https://github.com/enmeshed-analytics/duckdb-gridwalk"
+keywords = ["duckdb", "data transformation", "postgis", "geospatial"]
+categories = ["database", "data-processing"]
 
 [dependencies]
 duckdb = { version = "1.0.0", features = ["bundled"] }
+lexical-core = "1.0.2"
