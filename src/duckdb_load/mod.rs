@@ -59,7 +59,7 @@ impl DuckDBFileProcessor {
     }
 
     fn determine_file_type(file_path: &str) -> Result<FileType, Box<dyn Error>> {
-        // Open file
+        // Open file and read into buffer
         let mut file = File::open(file_path)?;
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer)?;
@@ -69,12 +69,10 @@ impl DuckDBFileProcessor {
 
         // Check for FileType
         match header {
-            b"PK\x03\x04" if header.starts_with(b"PK\x03\x04") => Ok(FileType::Excel),
-            b"SQLite format 3\0" if header == b"SQLite format 3\0" => Ok(FileType::Geopackage),
-            b"\x00\x00\x27\x0A" if header.starts_with(b"\x00\x00\x27\x0A") => {
-                Ok(FileType::Shapefile)
-            }
-            b"PAR1" if header.starts_with(b"PAR1") => Ok(FileType::Parquet),
+            b"PK\x03\x04" => Ok(FileType::Excel),
+            b"SQLite format 3\0" => Ok(FileType::Geopackage),
+            b"\x00\x00\x27\x0A" => Ok(FileType::Shapefile),
+            b"PAR1" => Ok(FileType::Parquet),
             _ if header.starts_with(b"{") => {
                 let json_start = std::str::from_utf8(&buffer)?;
                 if json_start.contains("\"type\":")
