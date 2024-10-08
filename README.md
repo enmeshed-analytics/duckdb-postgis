@@ -7,12 +7,13 @@ This Rust library uses DuckDB and serves as a data transformation layer in the G
 ### This Rust library does the following things:
 
 - Reads in a path for a geospatial data file (Geopackage, Shapefile, etc)
+- Reads in a table name for the PostGIS database
 - Loads this file into DuckDB
-- Determines the schema and current CRS of the data
+- Determines the schema and current CRS of the data - returns both
 - Performs CRS transformation on the data if required - ensuring the CRS is ESPG:4326
 - Loads the data into a PostGIS table with a correctly defined geometry column
 
-### Future releases:
+### Improvements for release 0.1.1:
 
 The plan is to have this take in both a file path and a UUID to be used as a table name. Changes will be made to ensure that the library improves its overall functionality:
 
