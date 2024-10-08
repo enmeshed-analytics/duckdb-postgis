@@ -2,7 +2,7 @@
 
 This Rust library uses DuckDB and serves as a data transformation layer in the Gridwalk architecture.
 
-## Current v0.1.0 release notes
+## Current v0.1.1 release notes
 
 ### This Rust library does the following things:
 
@@ -13,9 +13,7 @@ This Rust library uses DuckDB and serves as a data transformation layer in the G
 - Performs CRS transformation on the data if required - ensuring the CRS is ESPG:4326
 - Loads the data into a PostGIS table with a correctly defined geometry column
 
-### Improvements for release 0.1.1:
+### Improvements for release 0.1.2:
 
-The plan is to have this take in both a file path and a UUID to be used as a table name. Changes will be made to ensure that the library improves its overall functionality:
-
-- Handle many different file formats - xlsx, csv, raster data, etc
+- Handle raster data file formats
 - Discard rows where there may be errors in the geometry column / ensure the programme doesn't crash when a geometry error is encountered - skip over it and log it instead
