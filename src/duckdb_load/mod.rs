@@ -21,13 +21,14 @@ enum FileType {
 // This will include a UUID in the future that will be used for the PostGIS table name
 struct DuckDBFileProcessor {
     file_path: String,
+    table_name: String,
     file_type: FileType,
     conn: Connection,
 }
 
 // Implementation for DuckDBFileProcessor
 impl DuckDBFileProcessor {
-    fn new_file(file_path: &str) -> Result<Self, Box<dyn Error>> {
+    fn new_file(file_path: &str, table_name: &str) -> Result<Self, Box<dyn Error>> {
         // Determine FileType
         let file_type = Self::determine_file_type(file_path)?;
 
@@ -42,6 +43,7 @@ impl DuckDBFileProcessor {
 
         Ok(Self {
             file_path: file_path.to_string(),
+            table_name: table_name.to_string(),
             file_type,
             conn,
         })
@@ -52,7 +54,7 @@ impl DuckDBFileProcessor {
         self.create_data_table()?;
         self.query_and_print_schema()?;
         self.transform_crs("4326")?;
-        self.load_data_postgis("testing_123")?;
+        self.load_data_postgis()?;
         Ok(())
     }
 
@@ -202,7 +204,7 @@ impl DuckDBFileProcessor {
         }
     }
 
-    fn load_data_postgis(&self, table_name: &str) -> Result<(), Box<dyn Error>> {
+    fn load_data_postgis(&self) -> Result<(), Box<dyn Error>> {
         // Attach Postgres DB instance
         self.conn.execute(
             "ATTACH 'dbname=gridwalk user=admin password=password host=localhost port=5432' AS gridwalk_db (TYPE POSTGRES)",
@@ -211,12 +213,12 @@ impl DuckDBFileProcessor {
 
         // Execute CRUD logic
         let delete_if_table_exists_query =
-            &format!("DROP TABLE IF EXISTS gridwalk_db.{};", table_name);
+            &format!("DROP TABLE IF EXISTS gridwalk_db.{};", self.table_name);
         self.conn.execute(delete_if_table_exists_query, [])?;
 
         let create_table_query = &format!(
             "CREATE TABLE gridwalk_db.{} AS SELECT * FROM transformed_data;",
-            table_name
+            self.table_name
         );
         self.conn.execute(create_table_query, [])?;
 
@@ -226,21 +228,21 @@ impl DuckDBFileProcessor {
             UPDATE {} SET geom = ST_GeomFromText(geom_wkt, 4326);
             ALTER TABLE {} DROP COLUMN geom_wkt;
             ');",
-            table_name, table_name, table_name
+            self.table_name, self.table_name, self.table_name
         );
         self.conn.execute(postgis_query, [])?;
 
         println!(
             "Table {} created and data inserted successfully",
-            table_name
+            self.table_name
         );
         Ok(())
     }
 }
 
-pub fn launch_process_file(file_path: &str) -> Result<(), io::Error> {
+pub fn launch_process_file(file_path: &str, table_name: &str) -> Result<(), io::Error> {
     // Create new processor object
-    let processor = DuckDBFileProcessor::new_file(file_path).map_err(|e| {
+    let processor = DuckDBFileProcessor::new_file(file_path, table_name).map_err(|e| {
         io::Error::new(
             io::ErrorKind::Other,
             format!("Error creating FileProcessor for '{}': {}", file_path, e),
