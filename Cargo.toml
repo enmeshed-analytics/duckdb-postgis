@@ -7,7 +7,7 @@ description = "A library for transforming geospatial data using DuckDB and inges
 license = "MIT"
 repository = "https://github.com/enmeshed-analytics/duckdb-gridwalk"
 homepage = "https://github.com/enmeshed-analytics/duckdb-gridwalk"
-keywords = ["duckdb", "data transformation", "postgis", "geospatial"]
+keywords = ["duckdb", "data-transformation", "postgis", "geospatial"]
 categories = ["database", "data-processing"]
 
 [dependencies]
