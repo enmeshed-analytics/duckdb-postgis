@@ -53,6 +53,7 @@ impl DuckDBFileProcessor {
         // Call all the required methods
         self.create_data_table()?;
         self.query_and_print_schema()?;
+        self.get_geom_columns()?;
         self.transform_crs("4326")?;
         self.load_data_postgis()?;
         Ok(())
@@ -163,6 +164,29 @@ impl DuckDBFileProcessor {
         } else {
             Err(format!("CRS not found for the following file: {}", self.file_path).into())
         }
+    }
+
+    fn get_geom_columns(&self) -> Result<Vec<String>, Box<dyn Error>> {
+        // Query to get geometry column names
+        let query = "SELECT column_name FROM information_schema.columns WHERE table_name = 'data' AND data_type = 'GEOMETRY'";
+
+        // Prepare the statement
+        let mut stmt = self.conn.prepare(query)?;
+
+        // Execute the query and collect results
+        let mut rows = stmt.query([])?;
+        let mut geom_columns = Vec::new();
+
+        // Move names into Vector
+        while let Some(row) = rows.next()? {
+            let column_name: String = row.get(0)?;
+            geom_columns.push(column_name);
+        }
+
+        // Print the column names at the end
+        println!("Geometry columns: {:?}", &geom_columns);
+
+        Ok(geom_columns)
     }
 
     fn transform_crs(&self, target_crs: &str) -> Result<String, Box<dyn Error>> {
