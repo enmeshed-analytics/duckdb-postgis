@@ -1,5 +1,4 @@
 /target
 /local/postgresql/data
 *.DS_Store
-test_files/osopenusrn_202410.gpkg
-test_files/codepo_gb.gpkg
+test_files

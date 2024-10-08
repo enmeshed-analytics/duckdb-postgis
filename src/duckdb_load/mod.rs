@@ -53,8 +53,13 @@ impl DuckDBFileProcessor {
         // Call all the required methods
         self.create_data_table()?;
         self.query_and_print_schema()?;
-        self.transform_crs("4326")?;
-        self.load_data_postgis()?;
+
+        // Transform geometry columns and store the result
+        let geom_columns = self.transform_geom_columns()?;
+
+        // Pass the geometry columns to load_data_postgis
+        self.load_data_postgis(&geom_columns)?;
+
         Ok(())
     }
 
@@ -71,7 +76,7 @@ impl DuckDBFileProcessor {
         match header {
             b"PK\x03\x04" => Ok(FileType::Excel),
             b"SQLite format 3\0" => Ok(FileType::Geopackage),
-            b"\x00\x00\x27\x0A" => Ok(FileType::Shapefile),
+            [0, 0, 39, 10, ..] => Ok(FileType::Shapefile),
             b"PAR1" => Ok(FileType::Parquet),
             _ if header.starts_with(b"{") => {
                 let json_start = std::str::from_utf8(&buffer)?;
@@ -165,44 +170,68 @@ impl DuckDBFileProcessor {
         }
     }
 
-    fn transform_crs(&self, target_crs: &str) -> Result<String, Box<dyn Error>> {
-        // Get current CRS
-        let current_crs = self.get_crs_number()?;
-        println!("Current CRS: {}", current_crs);
+    fn transform_geom_columns(&self) -> Result<Vec<String>, Box<dyn Error>> {
+        let query = "SELECT column_name FROM information_schema.columns WHERE table_name = 'data' AND data_type = 'GEOMETRY'";
+        let mut stmt = self.conn.prepare(query)?;
+        let mut rows = stmt.query([])?;
+        let mut geom_columns = Vec::new();
 
-        // Create two paths for 'match to target crs' and 'no match to target crs'
+        while let Some(row) = rows.next()? {
+            let column_name: String = row.get(0)?;
+            geom_columns.push(column_name);
+        }
+
+        println!("Geometry columns: {:?}", &geom_columns);
+
+        // Call transform_crs for each geometry column
+        let target_crs = "4326";
+        for column in &geom_columns {
+            self.transform_crs(column, target_crs)?;
+        }
+
+        Ok(geom_columns)
+    }
+
+    fn transform_crs(&self, geom_column: &str, target_crs: &str) -> Result<String, Box<dyn Error>> {
+        let current_crs = self.get_crs_number()?;
+        println!("Current CRS for column {}: {}", geom_column, current_crs);
+
         let create_table_query = if current_crs == target_crs {
-            "CREATE TABLE transformed_data AS SELECT *,
-            ST_AsText(geom) as geom_wkt
-            FROM data;"
-        } else {
-            &format!(
+            format!(
                 "CREATE TABLE transformed_data AS SELECT *,
-                ST_AsText(ST_Transform(geom, 'EPSG:{}', 'EPSG:{}', always_xy := true)) AS geom_wkt
+                ST_AsText({}) as {}_wkt
                 FROM data;",
-                current_crs, target_crs
+                geom_column, geom_column
+            )
+        } else {
+            format!(
+                "CREATE TABLE transformed_data AS SELECT *,
+                ST_AsText(ST_Transform({}, 'EPSG:{}', 'EPSG:{}', always_xy := true)) AS {}_wkt
+                FROM data;",
+                geom_column, current_crs, target_crs, geom_column
             )
         };
 
-        // Excecute query and drop original geometry column
-        self.conn.execute(create_table_query, [])?;
-        self.conn
-            .execute("ALTER TABLE transformed_data DROP COLUMN geom;", [])?;
+        self.conn.execute(&create_table_query, [])?;
+        self.conn.execute(
+            &format!("ALTER TABLE transformed_data DROP COLUMN {};", geom_column),
+            [],
+        )?;
 
         if current_crs == target_crs {
             Ok(format!(
-                "CRS is already {}. Geometry converted to WKT and original geom column dropped.",
-                target_crs
+                "CRS for column {} is already {}. Geometry converted to WKT and original geom column dropped.",
+                geom_column, target_crs
             ))
         } else {
             Ok(format!(
-                "Transformation from EPSG:{} to EPSG:{} completed. Geometry converted to WKT and original geom column dropped.",
-                current_crs, target_crs
+                "Transformation of column {} from EPSG:{} to EPSG:{} completed. Geometry converted to WKT and original geom column dropped.",
+                geom_column, current_crs, target_crs
             ))
         }
     }
 
-    fn load_data_postgis(&self) -> Result<(), Box<dyn Error>> {
+    fn load_data_postgis(&self, geom_columns: &[String]) -> Result<(), Box<dyn Error>> {
         // Attach Postgres DB instance
         self.conn.execute(
             "ATTACH 'dbname=gridwalk user=admin password=password host=localhost port=5432' AS gridwalk_db (TYPE POSTGRES)",
@@ -220,19 +249,32 @@ impl DuckDBFileProcessor {
         );
         self.conn.execute(create_table_query, [])?;
 
+        // Construct PostGIS query for each geometry column
+        let mut postgis_queries = Vec::new();
+        for geom_column in geom_columns {
+            postgis_queries.push(format!(
+                "ALTER TABLE {} ADD COLUMN {} geometry;
+                UPDATE {} SET {} = ST_GeomFromText({}_wkt, 4326);
+                ALTER TABLE {} DROP COLUMN {}_wkt;",
+                self.table_name,
+                geom_column,
+                self.table_name,
+                geom_column,
+                geom_column,
+                self.table_name,
+                geom_column
+            ));
+        }
+
         let postgis_query = &format!(
-            "CALL postgres_execute('gridwalk_db', '
-            ALTER TABLE {} ADD COLUMN geom geometry;
-            UPDATE {} SET geom = ST_GeomFromText(geom_wkt, 4326);
-            ALTER TABLE {} DROP COLUMN geom_wkt;
-            ');",
-            self.table_name, self.table_name, self.table_name
+            "CALL postgres_execute('gridwalk_db', '{}');",
+            postgis_queries.join("\n")
         );
         self.conn.execute(postgis_query, [])?;
 
         println!(
-            "Table {} created and data inserted successfully",
-            self.table_name
+            "Table {} created and data inserted successfully with geometry columns: {:?}",
+            self.table_name, geom_columns
         );
         Ok(())
     }
