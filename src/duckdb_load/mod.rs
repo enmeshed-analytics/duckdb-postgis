@@ -110,7 +110,7 @@ impl DuckDBFileProcessor {
         let query = match self.file_type {
             FileType::Geopackage | FileType::Shapefile | FileType::Geojson => {
                 format!(
-                    "CREATE TABLE data AS SELECT * FROM ST_Read('{}') LIMIT 50;",
+                    "CREATE TABLE data AS SELECT * FROM ST_Read('{}');",
                     self.file_path
                 )
             }

@@ -17,7 +17,5 @@ This Rust library uses DuckDB and serves as a data transformation layer in the G
 
 The plan is to have this take in both a file path and a UUID to be used as a table name. Changes will be made to ensure that the library improves its overall functionality:
 
-- Account for when geometry columns have different names - such as "geom", "geometry", or something else!
-- Handle cases where data may have several geometry columns, not just 1!
 - Handle many different file formats - xlsx, csv, raster data, etc
 - Discard rows where there may be errors in the geometry column / ensure the programme doesn't crash when a geometry error is encountered - skip over it and log it instead
