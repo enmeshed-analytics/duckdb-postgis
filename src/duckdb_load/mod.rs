@@ -76,7 +76,7 @@ impl DuckDBFileProcessor {
         match header {
             b"PK\x03\x04" => Ok(FileType::Excel),
             b"SQLite format 3\0" => Ok(FileType::Geopackage),
-            b"\x00\x00\x27\x0A" => Ok(FileType::Shapefile),
+            [0, 0, 39, 10, ..] => Ok(FileType::Shapefile),
             b"PAR1" => Ok(FileType::Parquet),
             _ if header.starts_with(b"{") => {
                 let json_start = std::str::from_utf8(&buffer)?;
