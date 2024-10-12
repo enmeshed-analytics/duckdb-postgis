@@ -1,4 +1,5 @@
 # Rust lib for GridWalk Backend
+![Crates.io](https://img.shields.io/crates/d/duckdb-postgis)
 
 This Rust library uses DuckDB and serves as a data transformation layer in the Gridwalk architecture.
 
