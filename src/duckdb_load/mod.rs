@@ -251,11 +251,11 @@ impl DuckDBFileProcessor {
 
         // Execute CRUD logic
         let delete_if_table_exists_query =
-            &format!("DROP TABLE IF EXISTS gridwalk_db.{};", self.table_name);
+            &format!("DROP TABLE IF EXISTS gridwalk_db.\"{}\";", self.table_name);
         self.conn.execute(delete_if_table_exists_query, [])?;
 
         let create_table_query = &format!(
-            "CREATE TABLE gridwalk_db.{} AS SELECT * FROM transformed_data;",
+            "CREATE TABLE gridwalk_db.\"{}\" AS SELECT * FROM transformed_data;",
             self.table_name
         );
         self.conn.execute(create_table_query, [])?;
@@ -264,9 +264,9 @@ impl DuckDBFileProcessor {
         let mut postgis_queries = Vec::new();
         for geom_column in geom_columns {
             postgis_queries.push(format!(
-                "ALTER TABLE {} ADD COLUMN {} geometry;
-                UPDATE {} SET {} = ST_GeomFromText({}_wkt, 4326);
-                ALTER TABLE {} DROP COLUMN {}_wkt;",
+                "ALTER TABLE \"{}\" ADD COLUMN {} geometry;
+                UPDATE \"{}\" SET {} = ST_GeomFromText({}_wkt, 4326);
+                ALTER TABLE \"{}\" DROP COLUMN {}_wkt;",
                 self.table_name,
                 geom_column,
                 self.table_name,

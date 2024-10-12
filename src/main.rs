@@ -3,6 +3,10 @@ mod duckdb_load;
 use duckdb_load::launch_process_file;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    launch_process_file("FILE NAME HERE", "TABLE NAME HERE", "POSTGIS URI HERE")?;
+    launch_process_file(
+        "test_files/hotosm_twn_populated_places_points_geojson.geojson",
+        "my-table",
+        "postgresql://admin:password@localhost:5432/gridwalk",
+    )?;
     Ok(())
 }
