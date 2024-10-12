@@ -18,22 +18,29 @@ enum FileType {
 }
 
 // Struct representing core components
-// This will include a UUID in the future that will be used for the PostGIS table name
 struct DuckDBFileProcessor {
     file_path: String,
     table_name: String,
     file_type: FileType,
     conn: Connection,
+    postgis_uri: String,
 }
 
 // Implementation for DuckDBFileProcessor
 impl DuckDBFileProcessor {
-    fn new_file(file_path: &str, table_name: &str) -> Result<Self, Box<dyn Error>> {
+    fn new_file(
+        file_path: &str,
+        table_name: &str,
+        postgis_uri: &str,
+    ) -> Result<Self, Box<dyn Error>> {
         // Determine FileType
         let file_type = Self::determine_file_type(file_path)?;
 
         // Create Connection Object
         let conn = Connection::open(":memory:")?;
+
+        // Define postgis_uri
+        let postgis_uri = postgis_uri;
 
         // Install and load required extensions
         conn.execute("INSTALL spatial;", [])?;
@@ -46,6 +53,7 @@ impl DuckDBFileProcessor {
             table_name: table_name.to_string(),
             file_type,
             conn,
+            postgis_uri: postgis_uri.to_string(),
         })
     }
 
@@ -234,7 +242,10 @@ impl DuckDBFileProcessor {
     fn load_data_postgis(&self, geom_columns: &[String]) -> Result<(), Box<dyn Error>> {
         // Attach Postgres DB instance
         self.conn.execute(
-            "ATTACH 'dbname=gridwalk user=admin password=password host=localhost port=5432' AS gridwalk_db (TYPE POSTGRES)",
+            &format!(
+                "ATTACH '{}' AS gridwalk_db (TYPE POSTGRES)",
+                self.postgis_uri
+            ),
             [],
         )?;
 
@@ -280,14 +291,19 @@ impl DuckDBFileProcessor {
     }
 }
 
-pub fn launch_process_file(file_path: &str, table_name: &str) -> Result<(), io::Error> {
+pub fn launch_process_file(
+    file_path: &str,
+    table_name: &str,
+    postgis_uri: &str,
+) -> Result<(), io::Error> {
     // Create new processor object
-    let processor = DuckDBFileProcessor::new_file(file_path, table_name).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!("Error creating FileProcessor for '{}': {}", file_path, e),
-        )
-    })?;
+    let processor =
+        DuckDBFileProcessor::new_file(file_path, table_name, postgis_uri).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("Error creating FileProcessor for '{}': {}", file_path, e),
+            )
+        })?;
 
     println!(
         "Detected file type: {:?} for file: '{}'",
