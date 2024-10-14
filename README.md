@@ -1,7 +1,5 @@
-# Rust lib for GridWalk Backend
+# DuckDB Rust lib for writing geospatial data to Postgis
 ![Crates.io](https://img.shields.io/crates/d/duckdb-postgis)
-
-This Rust library uses DuckDB and serves as a data transformation layer in the Gridwalk architecture.
 
 ## Current v0.1.4 release notes
 
@@ -18,3 +16,19 @@ This Rust library uses DuckDB and serves as a data transformation layer in the G
 
 - Handle raster data file formats
 - Discard rows where there may be errors in the geometry column / ensure the programme doesn't crash when a geometry error is encountered - skip over it and log it instead
+
+### Example usage
+
+```rust
+mod duckdb_load;
+use duckdb_load::launch_process_file;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    launch_process_file(
+        "test_files/hotosm_twn_populated_places_points_geojson.geojson",
+        "my-table",
+        "postgresql://admin:password@localhost:5432/gridwalk",
+    )?;
+    Ok(())
+}
+```
