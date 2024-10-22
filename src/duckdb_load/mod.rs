@@ -24,6 +24,7 @@ struct DuckDBFileProcessor {
     file_type: FileType,
     conn: Connection,
     postgis_uri: String,
+    schema_name: String,
 }
 
 // Implementation for DuckDBFileProcessor
@@ -32,6 +33,7 @@ impl DuckDBFileProcessor {
         file_path: &str,
         table_name: &str,
         postgis_uri: &str,
+        schema_name: &str,
     ) -> Result<Self, Box<dyn Error>> {
         // Determine FileType
         let file_type = Self::determine_file_type(file_path)?;
@@ -54,6 +56,7 @@ impl DuckDBFileProcessor {
             file_type,
             conn,
             postgis_uri: postgis_uri.to_string(),
+            schema_name: schema_name.to_string(),
         })
     }
 
@@ -249,14 +252,34 @@ impl DuckDBFileProcessor {
             [],
         )?;
 
-        // Execute CRUD logic
-        let delete_if_table_exists_query =
-            &format!("DROP TABLE IF EXISTS gridwalk_db.\"{}\";", self.table_name);
-        self.conn.execute(delete_if_table_exists_query, [])?;
+        // Create schema if it doesn't exist - Execute this directly in PostgreSQL
+        // Note: We need to escape single quotes in the SQL string
+        let create_schema_sql = format!("CREATE SCHEMA IF NOT EXISTS \"{}\";", self.schema_name);
+        self.conn.execute(
+            &format!(
+                "CALL postgres_execute('gridwalk_db', '{}');",
+                create_schema_sql.replace('\'', "''")
+            ),
+            [],
+        )?;
 
+        // Schema qualified table name
+        let schema_qualified_table = format!("\"{}\".\"{}\"", self.schema_name, self.table_name);
+
+        // Execute CRUD logic - First drop the table if it exists
+        let drop_table_sql = format!("DROP TABLE IF EXISTS {};", schema_qualified_table);
+        self.conn.execute(
+            &format!(
+                "CALL postgres_execute('gridwalk_db', '{}');",
+                drop_table_sql.replace('\'', "''")
+            ),
+            [],
+        )?;
+
+        // Create data in table
         let create_table_query = &format!(
-            "CREATE TABLE gridwalk_db.\"{}\" AS SELECT * FROM transformed_data;",
-            self.table_name
+            "CREATE TABLE gridwalk_db.{} AS SELECT * FROM transformed_data;",
+            schema_qualified_table
         );
         self.conn.execute(create_table_query, [])?;
 
@@ -264,15 +287,15 @@ impl DuckDBFileProcessor {
         let mut postgis_queries = Vec::new();
         for geom_column in geom_columns {
             postgis_queries.push(format!(
-                "ALTER TABLE \"{}\" ADD COLUMN {} geometry;
-                UPDATE \"{}\" SET {} = ST_GeomFromText({}_wkt, 4326);
-                ALTER TABLE \"{}\" DROP COLUMN {}_wkt;",
-                self.table_name,
+                "ALTER TABLE {} ADD COLUMN {} geometry;
+                UPDATE {} SET {} = ST_GeomFromText({}_wkt, 4326);
+                ALTER TABLE {} DROP COLUMN {}_wkt;",
+                schema_qualified_table,
                 geom_column,
-                self.table_name,
+                schema_qualified_table,
                 geom_column,
                 geom_column,
-                self.table_name,
+                schema_qualified_table,
                 geom_column
             ));
         }
@@ -295,10 +318,11 @@ pub fn launch_process_file(
     file_path: &str,
     table_name: &str,
     postgis_uri: &str,
+    schema_name: &str,
 ) -> Result<(), io::Error> {
     // Create new processor object
-    let processor =
-        DuckDBFileProcessor::new_file(file_path, table_name, postgis_uri).map_err(|e| {
+    let processor = DuckDBFileProcessor::new_file(file_path, table_name, postgis_uri, schema_name)
+        .map_err(|e| {
             io::Error::new(
                 io::ErrorKind::Other,
                 format!("Error creating FileProcessor for '{}': {}", file_path, e),

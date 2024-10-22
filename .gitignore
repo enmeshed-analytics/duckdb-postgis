@@ -2,3 +2,4 @@
 /local/postgresql/data
 *.DS_Store
 test_files
+/local
