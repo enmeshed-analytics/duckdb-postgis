@@ -1,5 +1,9 @@
 # DuckDB Rust lib for writing geospatial data to Postgis
 
+'''bash
+cargo add duckdb-postgis
+'''
+
 ![Crates.io](https://img.shields.io/crates/d/duckdb-postgis)
 
 ## Current v0.1.6 release notes
