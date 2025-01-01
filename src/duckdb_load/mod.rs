@@ -66,12 +66,18 @@ impl DuckDBFileProcessor {
         self.query_and_print_schema()?;
     
         // First, check if we have any geometry columns
-        let query = "SELECT column_name FROM information_schema.columns 
-                    WHERE table_name = 'data' AND data_type = 'GEOMETRY'";
+        let query = "
+        SELECT column_name, data_type 
+        FROM information_schema.columns 
+        WHERE table_name = 'data' 
+        AND (data_type = 'GEOMETRY' OR 
+            (data_type = 'BLOB' AND 
+            (column_name LIKE '%geo%' OR column_name LIKE '%geom%')))";
+
         let mut stmt = self.conn.prepare(query)?;
         let mut rows = stmt.query([])?;
         
-        // If we find any geometry columns, process them specially
+        // If we find any geometry columns
         if rows.next()?.is_some() {
             // Transform geometry columns and store the result
             let geom_columns = self.transform_geom_columns()?;
@@ -177,7 +183,7 @@ impl DuckDBFileProcessor {
             }
             FileType::Excel => {
                 format!(
-                    "CREATE TABLE data AS SELECT * FROM st_read('{}');",
+                    "CREATE TABLE data AS SELECT * FROM ST_Read('{}');",
                     self.file_path
                 )
             }
@@ -189,7 +195,7 @@ impl DuckDBFileProcessor {
             }
             FileType::Parquet => {
                 format!(
-                    "CREATE TABLE data AS SELECT * FROM parquet_scan('{}');",
+                    "CREATE TABLE data AS SELECT * FROM read_parquet('{}');",
                     self.file_path
                 )
             }
@@ -232,26 +238,37 @@ impl DuckDBFileProcessor {
     }
 
     fn transform_geom_columns(&self) -> Result<Vec<String>, Box<dyn Error>> {
+        // Query to find both GEOMETRY and potential geometry BLOB columns
+        let query = "
+            SELECT column_name, data_type 
+            FROM information_schema.columns 
+            WHERE table_name = 'data' 
+            AND (data_type = 'GEOMETRY' OR 
+                (data_type = 'BLOB' AND column_name LIKE '%geo%' OR column_name LIKE '%geom%'))";
         
-        // Identify and select all geom columns 
-        // Put in vector and loop through it to process each
-        let query = "SELECT column_name FROM information_schema.columns WHERE table_name = 'data' AND data_type = 'GEOMETRY'";
         let mut stmt = self.conn.prepare(query)?;
         let mut rows = stmt.query([])?;
         let mut geom_columns = Vec::new();
-
+    
         while let Some(row) = rows.next()? {
             let column_name: String = row.get(0)?;
+            let data_type: String = row.get(1)?;
+            
+            // Handle the column based on its type
+            if data_type == "BLOB" {
+                // Try to convert BLOB to geometry
+                println!("BLOB FOUND");
+            }
             geom_columns.push(column_name);
         }
-
-        // Call transform_crs for each geometry column
+    
+        // Process geometry columns as before
         println!("Geometry columns: {:?}", &geom_columns);
         let target_crs = "4326";
         for column in &geom_columns {
             self.transform_crs(column, target_crs)?;
         }
-
+    
         Ok(geom_columns)
     }
 
