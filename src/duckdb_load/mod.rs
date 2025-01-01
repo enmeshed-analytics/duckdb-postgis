@@ -177,13 +177,13 @@ impl DuckDBFileProcessor {
         let query = match self.file_type {
             FileType::Geopackage | FileType::Shapefile | FileType::Geojson => {
                 format!(
-                    "CREATE TABLE data AS SELECT * FROM ST_Read('{}');",
+                    "CREATE TABLE data AS SELECT * FROM st_read('{}');",
                     self.file_path
                 )
             }
             FileType::Excel => {
                 format!(
-                    "CREATE TABLE data AS SELECT * FROM ST_Read('{}');",
+                    "CREATE TABLE data AS SELECT * FROM st_read('{}');",
                     self.file_path
                 )
             }
