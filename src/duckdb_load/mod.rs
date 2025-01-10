@@ -64,19 +64,22 @@ impl DuckDBFileProcessor {
         // Call initial methods
         self.create_data_table()?;
         self.query_and_print_schema()?;
-    
+
         // First, check if we have any geometry columns
         let query = "
-        SELECT column_name, data_type 
-        FROM information_schema.columns 
-        WHERE table_name = 'data' 
-        AND (data_type = 'GEOMETRY' OR 
-            (data_type = 'BLOB' AND 
-            (column_name LIKE '%geo%' OR column_name LIKE '%geom%')))";
+        SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_name = 'data'
+        AND (
+            data_type = 'GEOMETRY'
+            OR (data_type = 'BLOB' AND (column_name LIKE '%geo%' OR column_name LIKE '%geom%'))
+            OR column_name LIKE '%geom%'
+            OR column_name LIKE '%geometry%'
+        )";
 
         let mut stmt = self.conn.prepare(query)?;
         let mut rows = stmt.query([])?;
-        
+
         // If we find any geometry columns
         if rows.next()?.is_some() {
             // Transform geometry columns and store the result
@@ -84,10 +87,10 @@ impl DuckDBFileProcessor {
             // Pass the geometry columns to load_data_postgis
             self.load_data_postgis(&geom_columns)?;
         } else {
-            // No geometry columns - do a simple table copy
+            // No geometry columns - read non geospatial data
             self.load_non_geo_data()?;
         }
-    
+
         Ok(())
     }
 
@@ -114,21 +117,21 @@ impl DuckDBFileProcessor {
         match header {
             // Excel (XLSX) - PKZip signature
             [0x50, 0x4B, 0x03, 0x04, ..] => Some(FileType::Excel),
-            
-            // Excel (XLS) 
+
+            // Excel (XLS)
             [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1, ..] => Some(FileType::Excel),
-            
+
             // Parquet
             [0x50, 0x41, 0x52, 0x31, ..] => Some(FileType::Parquet),
-            
+
             // Geopackage (SQLite)
             [0x53, 0x51, 0x4C, 0x69, 0x74, 0x65, 0x20, 0x66, 0x6F, 0x72, 0x6D, 0x61, 0x74, 0x20, 0x33, 0x00, ..] => {
                 Some(FileType::Geopackage)
             }
-            
+
             // Shapefile
             [0x00, 0x00, 0x27, 0x0A, ..] => Some(FileType::Shapefile),
-            
+
             _ => None,
         }
     }
@@ -137,37 +140,38 @@ impl DuckDBFileProcessor {
         // Try GeoJSON first
         if let Ok(text) = std::str::from_utf8(buffer) {
             let text_lower = text.trim_start().to_lowercase();
-            
-            if text_lower.starts_with("{") 
+
+            if text_lower.starts_with("{")
                 && text_lower.contains("\"type\"")
-                && (text_lower.contains("\"featurecollection\"") 
+                && (text_lower.contains("\"featurecollection\"")
                     || text_lower.contains("\"feature\"")
-                    || text_lower.contains("\"geometry\"")) {
+                    || text_lower.contains("\"geometry\""))
+            {
                 return Ok(FileType::Geojson);
             }
-            
+
             // Check for CSV last
             if Self::is_valid_csv(text) {
                 return Ok(FileType::Csv);
             }
         }
-        
+
         Err("Unknown or unsupported file type".into())
     }
 
     fn is_valid_csv(content: &str) -> bool {
         let lines: Vec<&str> = content.lines().take(5).collect();
-        
+
         if lines.len() < 2 {
             return false;
         }
-        
+
         let first_line_fields = lines[0].split(',').count();
         // Require at least 2 columns and check for consistency
-        first_line_fields >= 2 
+        first_line_fields >= 2
             && lines[1..].iter().all(|line| {
                 let fields = line.split(',').count();
-                fields == first_line_fields 
+                fields == first_line_fields
                     && line.chars().all(|c| c.is_ascii() || c.is_whitespace())
             })
     }
@@ -240,20 +244,20 @@ impl DuckDBFileProcessor {
     fn transform_geom_columns(&self) -> Result<Vec<String>, Box<dyn Error>> {
         // Query to find both GEOMETRY and potential geometry BLOB columns
         let query = "
-            SELECT column_name, data_type 
-            FROM information_schema.columns 
-            WHERE table_name = 'data' 
-            AND (data_type = 'GEOMETRY' OR 
+            SELECT column_name, data_type
+            FROM information_schema.columns
+            WHERE table_name = 'data'
+            AND (data_type = 'GEOMETRY' OR
                 (data_type = 'BLOB' AND column_name LIKE '%geo%' OR column_name LIKE '%geom%'))";
-        
+
         let mut stmt = self.conn.prepare(query)?;
         let mut rows = stmt.query([])?;
         let mut geom_columns = Vec::new();
-    
+
         while let Some(row) = rows.next()? {
             let column_name: String = row.get(0)?;
             let data_type: String = row.get(1)?;
-            
+
             // Handle the column based on its type
             if data_type == "BLOB" {
                 // Try to convert BLOB to geometry
@@ -261,14 +265,14 @@ impl DuckDBFileProcessor {
             }
             geom_columns.push(column_name);
         }
-    
+
         // Process geometry columns as before
         println!("Geometry columns: {:?}", &geom_columns);
         let target_crs = "4326";
         for column in &geom_columns {
             self.transform_crs(column, target_crs)?;
         }
-    
+
         Ok(geom_columns)
     }
 
@@ -277,7 +281,7 @@ impl DuckDBFileProcessor {
         let current_crs = self.get_crs_number()?;
         println!("Current CRS for column {}: {}", geom_column, current_crs);
 
-        // Transform CRS if no match on target crs  
+        // Transform CRS if no match on target crs
         let create_table_query = if current_crs == target_crs {
             format!(
                 "CREATE TABLE transformed_data AS SELECT *,
@@ -395,7 +399,7 @@ impl DuckDBFileProcessor {
             ),
             [],
         )?;
-    
+
         // Create schema if it doesn't exist
         let create_schema_sql = format!("CREATE SCHEMA IF NOT EXISTS \"{}\";", self.schema_name);
         self.conn.execute(
@@ -405,10 +409,10 @@ impl DuckDBFileProcessor {
             ),
             [],
         )?;
-    
+
         // Schema qualified table name
         let schema_qualified_table = format!("\"{}\".\"{}\"", self.schema_name, self.table_name);
-    
+
         // Drop existing table if it exists
         let drop_table_sql = format!("DROP TABLE IF EXISTS {};", schema_qualified_table);
         self.conn.execute(
@@ -418,14 +422,14 @@ impl DuckDBFileProcessor {
             ),
             [],
         )?;
-    
+
         // Create data in table directly from 'data' table (no transformation needed)
         let create_table_query = &format!(
             "CREATE TABLE gridwalk_db.{} AS SELECT * FROM data;",
             schema_qualified_table
         );
         self.conn.execute(create_table_query, [])?;
-    
+
         println!(
             "Table {} created and data inserted successfully (no geometry columns)",
             self.table_name
