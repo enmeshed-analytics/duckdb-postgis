@@ -4,6 +4,7 @@ use std::error::Error;
 use std::fs::File;
 use std::io::{self, Read, Seek};
 use std::sync::Arc;
+use zip::ZipArchive;
 
 // Enum that represents potential FileTypes
 // More will be added in the future
@@ -60,6 +61,22 @@ impl DuckDBFileProcessor {
         })
     }
 
+    fn find_shapefile_path(zip_path: &str) -> Result<String, Box<dyn Error>> {
+        let file = File::open(zip_path)?;
+        let mut archive = ZipArchive::new(file)?;
+        
+        // Find first .shp file in the archive
+        for i in 0..archive.len() {
+            let file = archive.by_index(i)?;
+            let name = file.name();
+            if name.ends_with(".shp") {
+                return Ok(name.to_string());
+            }
+        }
+        
+        Err("No .shp file found in ZIP archive".into())
+    }
+    
     fn process_new_file(&self) -> Result<(), Box<dyn Error>> {
         // Call initial methods
         self.create_data_table()?;
@@ -97,7 +114,7 @@ impl DuckDBFileProcessor {
     fn determine_file_type(file_path: &str) -> Result<FileType, Box<dyn Error>> {
         // Open file and read first 100 bytes for magic number detection
         let mut file = File::open(file_path)?;
-        let mut header_buffer = [0u8; 100];
+        let mut header_buffer = [0u8; 150];
         let bytes_read = file.read(&mut header_buffer)?;
         let header = &header_buffer[..bytes_read];
 
@@ -113,25 +130,62 @@ impl DuckDBFileProcessor {
         Self::detect_content_based_type(&buffer)
     }
 
-    fn match_magic_numbers(header: &[u8]) -> Option<FileType> {
-        match header {
-            // Excel (XLSX) - PKZip signature
-            [0x50, 0x4B, 0x03, 0x04, ..] => Some(FileType::Excel),
-
-            // Excel (XLS)
+    fn match_magic_numbers(buffer: &[u8]) -> Option<FileType> {
+        match buffer {
+            // PKZip signature [0x50, 0x4B, 0x03, 0x04] detected
+            [0x50, 0x4B, 0x03, 0x04, rest @ ..] => {
+                // Define patterns for both file types - adjust sizes to match expected 13 elements
+                let excel_patterns: [&[u8]; 13] = [
+                    b"xl/worksheets",
+                    b"xl/_rels",
+                    b"docProps/",
+                    b"[Content_Types]",
+                    b"xl/workbook",
+                    b"xl/styles",
+                    b"xl/theme",
+                    b"xl/strings",
+                    b"xl/charts",
+                    b"xl/drawings",
+                    b"xl/sharedStrings",
+                    b"xl/metadata",
+                    b"xl/calc"
+                ];
+                
+                // Adjust shapefile patterns to match expected 4 elements
+                let shapefile_patterns: [&[u8]; 4] = [
+                    b".shp",
+                    b".dbf",
+                    b".prj",
+                    b".shx"
+                ];
+                
+                // Check for Excel patterns first
+                let is_excel = excel_patterns.iter().any(|&pattern| {
+                    rest.windows(pattern.len()).any(|window| window == pattern)
+                });
+                
+                // Check for Shapefile patterns
+                let is_shapefile = shapefile_patterns.iter().any(|&pattern| {
+                    rest.windows(pattern.len()).any(|window| window == pattern)
+                });
+                
+                match (is_excel, is_shapefile) {
+                    (true, false) => Some(FileType::Excel),
+                    (false, true) => Some(FileType::Shapefile),
+                    (true, true) => {
+                        // In case both patterns are found (unlikely) - return none
+                        println!("Error: Both patterns found - check file - none returned");
+                        None
+                    },
+                    (false, false) => None 
+                }
+            },
+            // Excel (XLS) - Compound File Binary Format
             [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1, ..] => Some(FileType::Excel),
-
             // Parquet
             [0x50, 0x41, 0x52, 0x31, ..] => Some(FileType::Parquet),
-
             // Geopackage (SQLite)
-            [0x53, 0x51, 0x4C, 0x69, 0x74, 0x65, 0x20, 0x66, 0x6F, 0x72, 0x6D, 0x61, 0x74, 0x20, 0x33, 0x00, ..] => {
-                Some(FileType::Geopackage)
-            }
-
-            // Shapefile
-            [0x00, 0x00, 0x27, 0x0A, ..] => Some(FileType::Shapefile),
-
+            [0x53, 0x51, 0x4C, 0x69, 0x74, 0x65, 0x20, 0x66, 0x6F, 0x72, 0x6D, 0x61, 0x74, 0x20, 0x33, 0x00, ..] => Some(FileType::Geopackage),
             _ => None,
         }
     }
@@ -179,10 +233,20 @@ impl DuckDBFileProcessor {
     fn create_data_table(&self) -> Result<(), Box<dyn Error>> {
         // Create initial data table
         let query = match self.file_type {
-            FileType::Geopackage | FileType::Shapefile | FileType::Geojson => {
+            FileType::Geopackage | FileType::Geojson => {
                 format!(
                     "CREATE TABLE data AS SELECT * FROM st_read('{}');",
                     self.file_path
+                )
+            }
+            FileType::Shapefile => {
+                let shapefile_path = Self::find_shapefile_path(&self.file_path)?;
+                println!("Shapefile path: {}", shapefile_path);
+                let full_path = format!("/vsizip//{}/{}", self.file_path, shapefile_path);
+                println!("Full path: {}", full_path);
+                format!(
+                    "CREATE TABLE data AS SELECT * FROM st_read('/vsizip//{}/{}');",
+                    self.file_path, shapefile_path
                 )
             }
             FileType::Excel => {
@@ -223,21 +287,46 @@ impl DuckDBFileProcessor {
     }
 
     fn get_crs_number(&self) -> Result<String, Box<dyn Error>> {
-        // Let and prep query
-        let query = format!(
-            "SELECT layers[1].geometry_fields[1].crs.auth_code AS crs_number
-            FROM st_read_meta('{}');",
-            self.file_path
-        );
-        let mut stmt = self.conn.prepare(&query)?;
-
-        // Run query and return CRS number
-        let mut rows = stmt.query([])?;
-        if let Some(row) = rows.next()? {
-            let crs_number: String = row.get(0)?;
-            Ok(crs_number)
+        if self.file_type == FileType::Shapefile {
+            // Read the .prj file from the zip
+            let file = File::open(&self.file_path)?;
+            let mut archive = ZipArchive::new(file)?;
+            let shapefile_path = Self::find_shapefile_path(&self.file_path)?;
+            let prj_path = shapefile_path.replace(".shp", ".prj");
+            
+            for i in 0..archive.len() {
+                let mut file = archive.by_index(i)?;
+                if file.name() == prj_path {
+                    let mut prj_content = String::new();
+                    file.read_to_string(&mut prj_content)?;
+                    
+                    // Check for common British National Grid identifiers in the PRJ
+                    if prj_content.contains("OSGB") || prj_content.contains("27700") {
+                        println!("Found British National Grid CRS in PRJ file");
+                        return Ok("27700".to_string());
+                    }
+                }
+            }
+            
+            // If we couldn't determine from PRJ, assume British National Grid for data
+            println!("No CRS found in PRJ file, assuming British National Grid (EPSG:27700)");
+            Ok("27700".to_string())
         } else {
-            Err(format!("CRS not found for the following file: {}", self.file_path).into())
+            // Original logic for non-shapefile types
+            let query = format!(
+                "SELECT layers[1].geometry_fields[1].crs.auth_code AS crs_number
+                FROM st_read_meta('{}');",
+                self.file_path
+            );
+            let mut stmt = self.conn.prepare(&query)?;
+            let mut rows = stmt.query([])?;
+            
+            if let Some(row) = rows.next()? {
+                let crs_number: String = row.get(0)?;
+                Ok(crs_number)
+            } else {
+                Err(format!("CRS not found for the following file: {}", self.file_path).into())
+            }
         }
     }
 
@@ -257,6 +346,11 @@ impl DuckDBFileProcessor {
         while let Some(row) = rows.next()? {
             let column_name: String = row.get(0)?;
             let data_type: String = row.get(1)?;
+
+            // Skip gdb_geomattr_data column
+            if column_name == "gdb_geomattr_data" {
+                continue;
+            }
 
             // Handle the column based on its type
             if data_type == "BLOB" {

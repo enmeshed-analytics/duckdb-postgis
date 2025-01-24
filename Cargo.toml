@@ -12,3 +12,4 @@ keywords = ["duckdb", "data-transformation", "postgis", "geospatial"]
 [dependencies]
 duckdb = { version = "1.1.1", features = ["bundled"] }
 lexical-core = "1.0.5"
+zip = "2.2.2"
