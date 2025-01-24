@@ -64,7 +64,7 @@ impl DuckDBFileProcessor {
     fn find_shapefile_path(zip_path: &str) -> Result<String, Box<dyn Error>> {
         let file = File::open(zip_path)?;
         let mut archive = ZipArchive::new(file)?;
-        
+
         // Find first .shp file in the archive
         for i in 0..archive.len() {
             let file = archive.by_index(i)?;
@@ -73,10 +73,10 @@ impl DuckDBFileProcessor {
                 return Ok(name.to_string());
             }
         }
-        
+
         Err("No .shp file found in ZIP archive".into())
     }
-    
+
     fn process_new_file(&self) -> Result<(), Box<dyn Error>> {
         // Call initial methods
         self.create_data_table()?;
@@ -148,27 +148,22 @@ impl DuckDBFileProcessor {
                     b"xl/drawings",
                     b"xl/sharedStrings",
                     b"xl/metadata",
-                    b"xl/calc"
+                    b"xl/calc",
                 ];
-                
+
                 // Adjust shapefile patterns to match expected 4 elements
-                let shapefile_patterns: [&[u8]; 4] = [
-                    b".shp",
-                    b".dbf",
-                    b".prj",
-                    b".shx"
-                ];
-                
+                let shapefile_patterns: [&[u8]; 4] = [b".shp", b".dbf", b".prj", b".shx"];
+
                 // Check for Excel patterns first
-                let is_excel = excel_patterns.iter().any(|&pattern| {
-                    rest.windows(pattern.len()).any(|window| window == pattern)
-                });
-                
+                let is_excel = excel_patterns
+                    .iter()
+                    .any(|&pattern| rest.windows(pattern.len()).any(|window| window == pattern));
+
                 // Check for Shapefile patterns
-                let is_shapefile = shapefile_patterns.iter().any(|&pattern| {
-                    rest.windows(pattern.len()).any(|window| window == pattern)
-                });
-                
+                let is_shapefile = shapefile_patterns
+                    .iter()
+                    .any(|&pattern| rest.windows(pattern.len()).any(|window| window == pattern));
+
                 match (is_excel, is_shapefile) {
                     (true, false) => Some(FileType::Excel),
                     (false, true) => Some(FileType::Shapefile),
@@ -176,16 +171,18 @@ impl DuckDBFileProcessor {
                         // In case both patterns are found (unlikely) - return none
                         println!("Error: Both patterns found - check file - none returned");
                         None
-                    },
-                    (false, false) => None 
+                    }
+                    (false, false) => None,
                 }
-            },
+            }
             // Excel (XLS) - Compound File Binary Format
             [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1, ..] => Some(FileType::Excel),
             // Parquet
             [0x50, 0x41, 0x52, 0x31, ..] => Some(FileType::Parquet),
             // Geopackage (SQLite)
-            [0x53, 0x51, 0x4C, 0x69, 0x74, 0x65, 0x20, 0x66, 0x6F, 0x72, 0x6D, 0x61, 0x74, 0x20, 0x33, 0x00, ..] => Some(FileType::Geopackage),
+            [0x53, 0x51, 0x4C, 0x69, 0x74, 0x65, 0x20, 0x66, 0x6F, 0x72, 0x6D, 0x61, 0x74, 0x20, 0x33, 0x00, ..] => {
+                Some(FileType::Geopackage)
+            }
             _ => None,
         }
     }
@@ -242,10 +239,10 @@ impl DuckDBFileProcessor {
             FileType::Shapefile => {
                 let shapefile_path = Self::find_shapefile_path(&self.file_path)?;
                 println!("Shapefile path: {}", shapefile_path);
-                let full_path = format!("/vsizip//{}/{}", self.file_path, shapefile_path);
+                let full_path = format!("/vsizip/{}/{}", self.file_path, shapefile_path);
                 println!("Full path: {}", full_path);
                 format!(
-                    "CREATE TABLE data AS SELECT * FROM st_read('/vsizip//{}/{}');",
+                    "CREATE TABLE data AS SELECT * FROM st_read('/vsizip/{}/{}');",
                     self.file_path, shapefile_path
                 )
             }
@@ -293,13 +290,13 @@ impl DuckDBFileProcessor {
             let mut archive = ZipArchive::new(file)?;
             let shapefile_path = Self::find_shapefile_path(&self.file_path)?;
             let prj_path = shapefile_path.replace(".shp", ".prj");
-            
+
             for i in 0..archive.len() {
                 let mut file = archive.by_index(i)?;
                 if file.name() == prj_path {
                     let mut prj_content = String::new();
                     file.read_to_string(&mut prj_content)?;
-                    
+
                     // Check for common British National Grid identifiers in the PRJ
                     if prj_content.contains("OSGB") || prj_content.contains("27700") {
                         println!("Found British National Grid CRS in PRJ file");
@@ -307,7 +304,7 @@ impl DuckDBFileProcessor {
                     }
                 }
             }
-            
+
             // If we couldn't determine from PRJ, assume British National Grid for data
             println!("No CRS found in PRJ file, assuming British National Grid (EPSG:27700)");
             Ok("27700".to_string())
@@ -320,7 +317,7 @@ impl DuckDBFileProcessor {
             );
             let mut stmt = self.conn.prepare(&query)?;
             let mut rows = stmt.query([])?;
-            
+
             if let Some(row) = rows.next()? {
                 let crs_number: String = row.get(0)?;
                 Ok(crs_number)
