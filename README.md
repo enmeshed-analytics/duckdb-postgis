@@ -6,7 +6,7 @@
 cargo add duckdb-postgis
 ```
 
-## Current v0.1.7 release notes
+## Current v0.1.8 release notes
 
 ### This Rust library does the following things
 
@@ -18,10 +18,11 @@ cargo add duckdb-postgis
 - Performs CRS transformation on the data if required - ensures the CRS is ESPG:4326
 - Loads the data into a PostGIS table with a correctly defined geometry column
 
-### Improvements for release 0.1.7
+### Improvements for release 0.1.9
 
 - Handle raster data file formats
 - Discard rows where there may be errors in the geometry column / ensure the programme doesn't crash when a geometry error is encountered - skip over it and log it instead
+- There are still bugs for loading parquet files and handling some types of geometry columns due to how they are named - these will be fixed in the next release
 
 ### Example usage
 
