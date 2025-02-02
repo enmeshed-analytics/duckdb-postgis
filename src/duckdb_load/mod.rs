@@ -7,7 +7,6 @@ use std::sync::Arc;
 use zip::ZipArchive;
 
 // Enum that represents potential FileTypes
-// More will be added in the future
 #[derive(Debug, PartialEq)]
 enum FileType {
     Geopackage,
@@ -61,24 +60,8 @@ impl DuckDBFileProcessor {
         })
     }
 
-    fn find_shapefile_path(zip_path: &str) -> Result<String, Box<dyn Error>> {
-        let file = File::open(zip_path)?;
-        let mut archive = ZipArchive::new(file)?;
-
-        // Find first .shp file in the archive
-        for i in 0..archive.len() {
-            let file = archive.by_index(i)?;
-            let name = file.name();
-            if name.ends_with(".shp") {
-                return Ok(name.to_string());
-            }
-        }
-
-        Err("No .shp file found in ZIP archive".into())
-    }
-
     fn process_new_file(&self) -> Result<(), Box<dyn Error>> {
-        // Call initial methods
+        // Call initial methods to get both the table created and the schema
         self.create_data_table()?;
         self.query_and_print_schema()?;
 
@@ -111,8 +94,25 @@ impl DuckDBFileProcessor {
         Ok(())
     }
 
+    fn find_shapefile_path(zip_path: &str) -> Result<String, Box<dyn Error>> {
+        // Open zip file
+        let file = File::open(zip_path)?;
+        let mut archive = ZipArchive::new(file)?;
+
+        // Find first .shp file in the archive
+        for i in 0..archive.len() {
+            let file = archive.by_index(i)?;
+            let name = file.name();
+            if name.ends_with(".shp") {
+                return Ok(name.to_string());
+            }
+        }
+
+        Err("No .shp file found in ZIP archive".into())
+    }
+
     fn determine_file_type(file_path: &str) -> Result<FileType, Box<dyn Error>> {
-        // Open file and read first 100 bytes for magic number detection
+        // Open file and read first 150 bytes for magic number detection
         let mut file = File::open(file_path)?;
         let mut header_buffer = [0u8; 150];
         let bytes_read = file.read(&mut header_buffer)?;
@@ -123,7 +123,7 @@ impl DuckDBFileProcessor {
             return Ok(file_type);
         }
 
-        // If magic numbers don't match, perform content-based detection
+        // If magic numbers don't match, perform content-based detection for either csv or geojson/json
         let mut buffer = Vec::new();
         file.seek(std::io::SeekFrom::Start(0))?;
         file.read_to_end(&mut buffer)?;
@@ -228,7 +228,7 @@ impl DuckDBFileProcessor {
     }
 
     fn create_data_table(&self) -> Result<(), Box<dyn Error>> {
-        // Create initial data table
+        // Create initial data table - with different methods depending on the FileType
         let query = match self.file_type {
             FileType::Geopackage | FileType::Geojson => {
                 format!(
@@ -238,14 +238,13 @@ impl DuckDBFileProcessor {
             }
             FileType::Shapefile => {
                 let shapefile_path = Self::find_shapefile_path(&self.file_path)?;
-                println!("Shapefile path: {}", shapefile_path);
-                let full_path = format!("/vsizip/{}/{}", self.file_path, shapefile_path);
-                println!("Full path: {}", full_path);
+                println!("Shapefile Path Found: {}", shapefile_path);
                 format!(
                     "CREATE TABLE data AS SELECT * FROM st_read('/vsizip/{}/{}');",
                     self.file_path, shapefile_path
                 )
             }
+            // TODO replace st_read method with new excel specific method in new release of duckdb - tbc
             FileType::Excel => {
                 format!(
                     "CREATE TABLE data AS SELECT * FROM st_read('{}');",
@@ -279,7 +278,7 @@ impl DuckDBFileProcessor {
         let schema = arrow_result.get_schema();
 
         // Print and return schema
-        println!("Schema: {:?}", schema);
+        println!("The data schema is: {:?}", schema);
         Ok(schema)
     }
 
@@ -344,7 +343,8 @@ impl DuckDBFileProcessor {
             let column_name: String = row.get(0)?;
             let data_type: String = row.get(1)?;
 
-            // Skip gdb_geomattr_data column
+            // Skip gdb_geomattr_data column - sometimes this column can be present
+            // and it shouldn't be loaded as a geom column
             if column_name == "gdb_geomattr_data" {
                 continue;
             }

@@ -41,3 +41,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 ```
+
+Useful reading on how the duckdb to postgres 'attach' and 'execute' functionality works: https://duckdb.org/docs/extensions/postgres.html
