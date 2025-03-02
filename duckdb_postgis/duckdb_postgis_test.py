@@ -1,17 +1,17 @@
 # Testing that it works in Python
-import duckdb_postgis
+from duckdb_postgis import process_file
 
 def test_duckdb_postgis_import():
     """Test function to verify the duckdb_postgis module is working correctly."""
     try:
-        print("Available functions:", dir(duckdb_postgis))
+        # print("Available functions:", dir(duckdb_postgis))
 
         # Attempt to process the test file
-        duckdb_postgis.process_file(
-            "[add_file_path]",
-            "[add_table]",
-            "postgresql://admin:password@localhost:5432/[add_db_name]",
-            "[add_schema]"
+        process_file(
+        "test_files/GLA_High_Street_boundaries.gpkg",
+        "add_table",
+        "postgresql://admin:password@localhost:5432/gridwalk",
+        "add_schema",
         )
         print("File processing completed successfully")
         return True

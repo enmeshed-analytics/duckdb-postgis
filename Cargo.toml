@@ -14,7 +14,13 @@ name = "duckdb_postgis"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-duckdb = { version = "1.1.1", features = ["bundled"] }
+duckdb = { version = "1.2.0", features = ["bundled"] }
 lexical-core = "1.0.5"
 zip = "2.2.2"
-pyo3 = { version = "0.23.4", features = ["extension-module"] }
+
+[dependencies.pyo3]
+git = "https://github.com/pyo3/pyo3"
+
+[features]
+extension-module = ["pyo3/extension-module"]
+
