@@ -1,6 +1,6 @@
 [package]
 name = "duckdb-postgis"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 authors = ["chris@enmeshed.dev", "serj@enmeshed.dev"]
 description = "A library for transforming geospatial data using DuckDB and ingesting it into a PostGIS database."

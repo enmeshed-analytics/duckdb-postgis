@@ -5,21 +5,19 @@
 ```bash
 cargo add duckdb-postgis
 ```
+
 This now supports python and will soon be available on PyPi.
 
-## Current v0.1.9 release notes
+## Current Release v0.1.10
 
 ### This Rust library does the following things
 
-- Reads in a path for a geospatial data file (Geopackage, Shapefile, etc)
-- Reads in a path for non geospatial data (xlsx, xsv, parquet, etc)
-- Reads in a table name for the PostGIS database
-- Loads this file into DuckDB
-- Determines the schema and current CRS of the data - returns both
+- Reads in geospatial data file types (Geopackage, Shapefile, etc)
+- Reads in non geospatial data
 - Performs CRS transformation on the data if required - ensures the CRS is ESPG:4326
 - Loads the data into a PostGIS table with a correctly defined geometry column
 
-### Improvements for release 0.1.10
+### Improvements for release 0.1.11
 
 - Handle raster data file format?
 - Discard rows where there may be errors in the geometry column / ensure the programme doesn't crash when a geometry error is encountered - skip over it and log it instead
@@ -43,6 +41,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 ```
+
+This can also be called in Python thanks to Pyo3.
 
 ```python
 import duckdb_postgis
