@@ -8,7 +8,7 @@ cargo add duckdb-postgis
 
 This now supports python and will soon be available on PyPi.
 
-## Current Release v0.1.10
+## Current Release v0.1.11
 
 ### This Rust library does the following things
 
@@ -17,7 +17,7 @@ This now supports python and will soon be available on PyPi.
 - Performs CRS transformation on the data if required - ensures the CRS is ESPG:4326
 - Loads the data into a PostGIS table with a correctly defined geometry column
 
-### Improvements for release 0.1.11
+### Improvements for release 0.1.12
 
 - Handle raster data file format?
 - Discard rows where there may be errors in the geometry column / ensure the programme doesn't crash when a geometry error is encountered - skip over it and log it instead
