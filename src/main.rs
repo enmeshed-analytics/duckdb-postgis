@@ -1,6 +1,6 @@
 // Example usage
 mod duckdb_load;
-use duckdb_load::launch_process_file;
+use duckdb_load::core_processor::launch_process_file;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     launch_process_file(
