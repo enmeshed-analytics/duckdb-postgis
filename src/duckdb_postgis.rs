@@ -7,7 +7,7 @@ fn process_file(
     postgis_uri: &str,
     schema_name: &str,
 ) -> PyResult<()> {
-    crate::duckdb_load::launch_process_file(file_path, table_name, postgis_uri, schema_name)
+    crate::duckdb_load::core_processor::launch_process_file(file_path, table_name, postgis_uri, schema_name)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
     Ok(())
 }

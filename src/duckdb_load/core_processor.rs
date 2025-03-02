@@ -6,11 +6,13 @@ use std::io::{self, Read, Seek};
 use std::sync::Arc;
 use zip::ZipArchive;
 
-//TODO: Further seperate out geometry and non-geometry data paths
-//TODO: Implement seperate Processor Strategies for geometry and non-geometry data
+use crate::duckdb_load::postgis_processor::PostgisProcessor;
+use crate::duckdb_load::geo_strategy::GeoStrategy;
+use crate::duckdb_load::non_geo_strategy::NonGeoStrategy;
+
 // Enum that represents potential FileTypes
-#[derive(Debug, PartialEq)]
-enum FileType {
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum FileType {
     Geopackage,
     Shapefile,
     Geojson,
@@ -19,97 +21,8 @@ enum FileType {
     Parquet,
 }
 
-// Data Loader trait to load data to postgres
-trait DataLoader{
-    fn load_to_postgres(&self, processor: &DuckDBFileProcessor) -> Result<(), Box<dyn Error>>;
-}
-
-// Struct for handling geometric data
-struct GeoDataLoader {
-    geom_columns: Vec<String>,
-}
-
-// Struct for handling non-geometric data
-struct NonGeoDataLoader;
-
-impl GeoDataLoader {
-    fn new(geom_columns: Vec<String>) -> Self {
-        Self { geom_columns }
-    }
-}
-
-impl DataLoader for GeoDataLoader {
-    fn load_to_postgres(&self, processor: &DuckDBFileProcessor) -> Result<(), Box<dyn Error>> {
-        println!("LOADING GEOSPATIAL DATA");
-        processor.attach_postgres_db()?;
-        processor.create_schema()?;
-        
-        let schema_qualified_table = processor.get_schema_qualified_table();
-        processor.drop_existing_table(&schema_qualified_table)?;
-
-        // Create data in table
-        let create_table_query = &format!(
-            "CREATE TABLE gridwalk_db.{} AS SELECT * FROM transformed_data;",
-            schema_qualified_table
-        );
-        processor.conn.execute(create_table_query, [])?;
-
-        // Process geometry columns
-        let mut postgis_queries = Vec::new();
-        for geom_column in &self.geom_columns {
-            postgis_queries.push(format!(
-                "ALTER TABLE {} ADD COLUMN {} geometry;
-                UPDATE {} SET {} = ST_GeomFromText({}_wkt, 4326);
-                ALTER TABLE {} DROP COLUMN {}_wkt;",
-                schema_qualified_table,
-                geom_column,
-                schema_qualified_table,
-                geom_column,
-                geom_column,
-                schema_qualified_table,
-                geom_column
-            ));
-        }
-
-        let postgis_query = &format!(
-            "CALL postgres_execute('gridwalk_db', '{}');",
-            postgis_queries.join("\n")
-        );
-        processor.conn.execute(postgis_query, [])?;
-
-        println!(
-            "Table {} created and data inserted successfully with geometry columns: {:?}",
-            processor.table_name, self.geom_columns
-        );
-        Ok(())
-    }
-}
-
-impl DataLoader for NonGeoDataLoader {
-    fn load_to_postgres(&self, processor: &DuckDBFileProcessor) -> Result<(), Box<dyn Error>> {
-        println!("LOADING NON GEOSPATIAL DATA");
-        processor.attach_postgres_db()?;
-        processor.create_schema()?;
-
-        let schema_qualified_table = processor.get_schema_qualified_table();
-        processor.drop_existing_table(&schema_qualified_table)?;
-
-        let create_table_query = &format!(
-            "CREATE TABLE gridwalk_db.{} AS SELECT * FROM data;",
-            schema_qualified_table
-        );
-        processor.conn.execute(create_table_query, [])?;
-
-        println!(
-            "Table {} created and data inserted successfully (no geometry columns)",
-            processor.table_name
-        );
-        Ok(())
-    }
-}
-
-// Struct representing core duckdb file processor object
-struct DuckDBFileProcessor {
+// Main processor struct that handles most common operations
+pub struct CoreProcessor {
     file_path: String,
     table_name: String,
     file_type: FileType,
@@ -118,9 +31,13 @@ struct DuckDBFileProcessor {
     schema_name: String,
 }
 
-// Implementation for DuckDBFileProcessor
-impl DuckDBFileProcessor {
-    // Constructor for DuckDBFileProcessor
+// Implementation for CoreProcessor
+// The CorePrcessor contains common operations for all processors/strategies
+// It also handles duckdb connections and extensions as well as schema creation
+// It also handles file type detection and creation of the initial data table
+// TODO: May we could take out the common operations into a separate trait?
+impl CoreProcessor {
+    // Constructor for CoreProcessor
     fn clean_table_name(table_name: &str) -> String {
         // Remove file extension and any leading/trailing whitespace
         table_name
@@ -130,6 +47,8 @@ impl DuckDBFileProcessor {
             .trim()
             .to_string()
     }
+    
+    // Create new CoreProcessor
     fn new_file(
         file_path: &str,
         table_name: &str,
@@ -156,27 +75,34 @@ impl DuckDBFileProcessor {
     }
 
     // Process the new file
+    // This is the main workflow for the CoreProcessor
     fn process_new_file(&self) -> Result<(), Box<dyn Error>> {
-        self.create_data_table()?;
+        // Common setup
+        self.create_duckb_table()?;
         self.query_and_print_schema()?;
-
+        
+        // Determine if there are geometry columns
         let geom_columns = self.find_geometry_columns()?;
         
-        let loader: Box<dyn DataLoader> = if !geom_columns.is_empty() {
+        // Create and execute the appropriate strategy
+        // PostgisProcessor is the trait that both strategies implement
+        // Depending on whether there are geometry columns, the appropriate strategy is applied!
+        let strategy: Box<dyn PostgisProcessor> = if !geom_columns.is_empty() {
             println!("Geometry columns found");
-            self.transform_geom_columns(&geom_columns)?;
-            Box::new(GeoDataLoader::new(geom_columns))
+            Box::new(GeoStrategy::new(geom_columns))
         } else {
             println!("No geometry columns found");
-            Box::new(NonGeoDataLoader)
+            Box::new(NonGeoStrategy)
         };
-
-        loader.load_to_postgres(self)?;
+        
+        // Execute the chosen strategy
+        strategy.process_data_into_postgis(self)?;
+        
         Ok(())
     }
 
     // Attach the postgres database
-    fn attach_postgres_db(&self) -> Result<(), Box<dyn Error>> {
+    pub fn attach_postgres_db(&self) -> Result<(), Box<dyn Error>> {
         self.conn.execute(
             &format!(
                 "ATTACH '{}' AS gridwalk_db (TYPE POSTGRES)",
@@ -188,7 +114,7 @@ impl DuckDBFileProcessor {
     }
 
     // Create the schema
-    fn create_schema(&self) -> Result<(), Box<dyn Error>> {
+    pub fn create_schema(&self) -> Result<(), Box<dyn Error>> {
         let create_schema_sql = format!("CREATE SCHEMA IF NOT EXISTS \"{}\";", self.schema_name);
         self.conn.execute(
             &format!(
@@ -201,13 +127,12 @@ impl DuckDBFileProcessor {
     }
 
     // Get the schema qualified table
-    fn get_schema_qualified_table(&self) -> String {
+    pub fn get_schema_qualified_table(&self) -> String {
         format!("\"{}\".\"{}\"", self.schema_name, self.table_name)
     }
 
     // Drop the existing table
-    // This prevents the table from being created if it already exists
-    fn drop_existing_table(&self, schema_qualified_table: &str) -> Result<(), Box<dyn Error>> {
+    pub fn drop_existing_table(&self, schema_qualified_table: &str) -> Result<(), Box<dyn Error>> {
         let drop_table_sql = format!("DROP TABLE IF EXISTS {};", schema_qualified_table);
         self.conn.execute(
             &format!(
@@ -248,9 +173,7 @@ impl DuckDBFileProcessor {
     }
 
     // Find shapefile path if file is a zip
-    // We currently assume all zip files are shapefiles
-    // TODO: Add support for other file types in zip files
-    fn find_shapefile_path(zip_path: &str) -> Result<String, Box<dyn Error>> {
+    pub fn find_shapefile_path(zip_path: &str) -> Result<String, Box<dyn Error>> {
         let file = File::open(zip_path)?;
         let mut archive = ZipArchive::new(file)?;
 
@@ -380,7 +303,7 @@ impl DuckDBFileProcessor {
     }
 
     // Create the data table in duckdb
-    fn create_data_table(&self) -> Result<(), Box<dyn Error>> {
+    fn create_duckb_table(&self) -> Result<(), Box<dyn Error>> {
         let query = match self.file_type {
             FileType::Geopackage | FileType::Geojson => {
                 format!(
@@ -429,108 +352,36 @@ impl DuckDBFileProcessor {
         Ok(schema)
     }
 
-    // Get the CRS number
-    fn get_crs_number(&self) -> Result<String, Box<dyn Error>> {
-        if self.file_type == FileType::Shapefile {
-            let file = File::open(&self.file_path)?;
-            let mut archive = ZipArchive::new(file)?;
-            let shapefile_path = Self::find_shapefile_path(&self.file_path)?;
-            let prj_path = shapefile_path.replace(".shp", ".prj");
-
-            for i in 0..archive.len() {
-                let mut file = archive.by_index(i)?;
-                if file.name() == prj_path {
-                    let mut prj_content = String::new();
-                    file.read_to_string(&mut prj_content)?;
-
-                    if prj_content.contains("OSGB") || prj_content.contains("27700") {
-                        println!("Found British National Grid CRS in PRJ file");
-                        return Ok("27700".to_string());
-                    }
-                }
-            }
-
-            println!("No CRS found in PRJ file, assuming British National Grid (EPSG:27700)");
-            Ok("27700".to_string())
-        } else {
-            let query = format!(
-                "SELECT layers[1].geometry_fields[1].crs.auth_code AS crs_number
-                FROM st_read_meta('{}');",
-                self.file_path
-            );
-            let mut stmt = self.conn.prepare(&query)?;
-            let mut rows = stmt.query([])?;
-
-            if let Some(row) = rows.next()? {
-                let crs_number: String = row.get(0)?;
-                Ok(crs_number)
-            } else {
-                Err(format!("CRS not found for the following file: {}", self.file_path).into())
-            }
-        }
+    // For fields that need to be accessed by strategies
+    pub fn file_path(&self) -> &str {
+        &self.file_path
     }
 
-    // Transform the geometry columns to the target CRS
-    fn transform_geom_columns(&self, geom_columns: &[String]) -> Result<(), Box<dyn Error>> {
-        println!("Geometry columns: {:?}", geom_columns);
-        let target_crs = "4326";
-        for column in geom_columns {
-            self.transform_crs(column, target_crs)?;
-        }
-        Ok(())
+    pub fn table_name(&self) -> &str {
+        &self.table_name
     }
 
-    fn transform_crs(&self, geom_column: &str, target_crs: &str) -> Result<String, Box<dyn Error>> {
-        let current_crs = self.get_crs_number()?;
-        println!("Current CRS for column {}: {}", geom_column, current_crs);
+    pub fn file_type(&self) -> FileType {
+        self.file_type
+    }
 
-        let create_table_query = if current_crs == target_crs {
-            format!(
-                "CREATE TABLE transformed_data AS SELECT *,
-                ST_AsText({}) as {}_wkt
-                FROM data;",
-                geom_column, geom_column
-            )
-        } else {
-            format!(
-                "CREATE TABLE transformed_data AS SELECT *,
-                ST_AsText(ST_Transform({}, 'EPSG:{}', 'EPSG:{}', always_xy := true)) AS {}_wkt
-                FROM data;",
-                geom_column, current_crs, target_crs, geom_column
-            )
-        };
-
-        self.conn.execute(&create_table_query, [])?;
-        self.conn.execute(
-            &format!("ALTER TABLE transformed_data DROP COLUMN {};", geom_column),
-            [],
-        )?;
-
-        if current_crs == target_crs {
-            Ok(format!(
-                "CRS for column {} is already {}. Geometry converted to WKT and original geom column dropped.",
-                geom_column, target_crs
-            ))
-        } else {
-            Ok(format!(
-                "Transformation of column {} from EPSG:{} to EPSG:{} completed. Geometry converted to WKT and original geom column dropped.",
-                geom_column, current_crs, target_crs
-            ))
-        }
+    pub fn conn(&self) -> &Connection {
+        &self.conn
     }
 }
 
+/// Public function to process a file
 pub fn launch_process_file(
     file_path: &str,
     table_name: &str,
     postgis_uri: &str,
     schema_name: &str,
 ) -> Result<(), io::Error> {
-    let processor = DuckDBFileProcessor::new_file(file_path, table_name, postgis_uri, schema_name)
+    let processor = CoreProcessor::new_file(file_path, table_name, postgis_uri, schema_name)
         .map_err(|e| {
             io::Error::new(
                 io::ErrorKind::Other,
-                format!("Error creating FileProcessor for '{}': {}", file_path, e),
+                format!("Error creating processor for '{}': {}", file_path, e),
             )
         })?;
 
