@@ -1,11 +1,13 @@
 # Testing that it works in Python
 from duckdb_postgis import process_file
+import duckdb_postgis
 
 def test_duckdb_postgis_import():
     """Test function to verify the duckdb_postgis module is working correctly."""
     try:
-        # print("Available functions:", dir(duckdb_postgis))
-
+        # Check that the module is working correctly and being called in Python
+        print("THIS IS BEING CALLED IN PYTHON")
+        print("Available functions:", dir(duckdb_postgis))
         # Attempt to process the test file
         process_file(
         "test_files/GLA_High_Street_boundaries.gpkg",
