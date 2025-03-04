@@ -35,21 +35,10 @@ pub struct CoreProcessor {
 // The CorePrcessor contains common operations for all processors/strategies
 // It also handles duckdb connections and extensions as well as schema creation
 // It also handles file type detection and creation of the initial data table
-// TODO: May we could take out the common operations into a separate trait?
+// TODO: We could take out the common operations into a separate trait?
 impl CoreProcessor {
-    // Constructor for CoreProcessor
-    fn clean_table_name(table_name: &str) -> String {
-        // Remove file extension and any leading/trailing whitespace
-        table_name
-            .rsplit_once('.')
-            .map(|(name, _)| name)
-            .unwrap_or(table_name)
-            .trim()
-            .to_string()
-    }
-    
     // Create new CoreProcessor
-    fn new_file(
+    fn create_core_processor(
         file_path: &str,
         table_name: &str,
         postgis_uri: &str,
@@ -74,10 +63,21 @@ impl CoreProcessor {
         })
     }
 
+    // Clean the table name so that the extension is removed
+    fn clean_table_name(table_name: &str) -> String {
+        // Remove file extension and any leading/trailing whitespace
+        table_name
+            .rsplit_once('.')
+            .map(|(name, _)| name)
+            .unwrap_or(table_name)
+            .trim()
+            .to_string()
+    }
+
     // Process the new file
     // This is the main workflow for the CoreProcessor
-    fn process_new_file(&self) -> Result<(), Box<dyn Error>> {
-        // Common setup
+    fn launch_core_processor(&self) -> Result<(), Box<dyn Error>> {
+        // Setup duckdb table and print out the schema
         self.create_duckb_table()?;
         self.query_and_print_schema()?;
         
@@ -101,6 +101,7 @@ impl CoreProcessor {
         Ok(())
     }
 
+    //TODO: Everything below here is common to all strategies and needs to be moved to a trait?
     // Attach the postgres database
     pub fn attach_postgres_db(&self) -> Result<(), Box<dyn Error>> {
         self.conn.execute(
@@ -352,7 +353,7 @@ impl CoreProcessor {
         Ok(schema)
     }
 
-    // For fields that need to be accessed by strategies
+    // Getter methods for attributes that need to be accessed by strategies
     pub fn file_path(&self) -> &str {
         &self.file_path
     }
@@ -371,13 +372,13 @@ impl CoreProcessor {
 }
 
 /// Public function to process a file
-pub fn launch_process_file(
+pub fn process_file(
     file_path: &str,
     table_name: &str,
     postgis_uri: &str,
     schema_name: &str,
 ) -> Result<(), io::Error> {
-    let processor = CoreProcessor::new_file(file_path, table_name, postgis_uri, schema_name)
+    let processor = CoreProcessor::create_core_processor(file_path, table_name, postgis_uri, schema_name)
         .map_err(|e| {
             io::Error::new(
                 io::ErrorKind::Other,
@@ -390,7 +391,7 @@ pub fn launch_process_file(
         processor.file_type, file_path
     );
 
-    processor.process_new_file().map_err(|e| {
+    processor.launch_core_processor().map_err(|e| {
         io::Error::new(
             io::ErrorKind::Other,
             format!(
