@@ -21,6 +21,21 @@ pub enum FileType {
     Parquet,
 }
 
+// Add Display implementation for FileType
+impl std::fmt::Display for FileType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            FileType::Geopackage => "Geopackage",
+            FileType::Shapefile => "Shapefile", 
+            FileType::Geojson => "GeoJSON",
+            FileType::Excel => "Excel",
+            FileType::Csv => "CSV",
+            FileType::Parquet => "Parquet",
+        };
+        write!(f, "{}", name)
+    }
+}
+
 // Main processor struct that handles most common operations
 pub struct CoreProcessor {
     file_path: String,
@@ -29,6 +44,7 @@ pub struct CoreProcessor {
     conn: Connection,
     postgis_uri: String,
     schema_name: String,
+    coordinate_columns: Option<(String, String)>,
 }
 
 // Implementation for CoreProcessor
@@ -45,27 +61,31 @@ impl CoreProcessor {
         schema_name: &str,
     ) -> Result<Self, Box<dyn Error>> {
         let file_type = Self::determine_file_type(file_path)?;
-        let conn = Connection::open(":memory:")?;
+        println!("Detected file type: {:?} for file: '{}'", file_type, file_path);
 
-        // Install and load required extensions
+        let table_name = Self::clean_table_name(table_name);
+        let conn = Connection::open_in_memory()?;
+        
+        // Load the spatial extension for DuckDB
         conn.execute("INSTALL spatial;", [])?;
         conn.execute("LOAD spatial;", [])?;
         conn.execute("INSTALL postgres;", [])?;
         conn.execute("LOAD postgres;", [])?;
 
-        Ok(Self {
+        Ok(CoreProcessor {
             file_path: file_path.to_string(),
-            table_name: Self::clean_table_name(table_name),
+            table_name,
             file_type,
             conn,
             postgis_uri: postgis_uri.to_string(),
             schema_name: schema_name.to_string(),
+            coordinate_columns: None,
         })
     }
 
     // Clean the table name so that the extension is removed
     fn clean_table_name(table_name: &str) -> String {
-        // Remove file extension and any leading/trailing whitespace
+        // Remove file extension and any leading/trailing whitespace - needed for the front end to display the table name
         table_name
             .rsplit_once('.')
             .map(|(name, _)| name)
@@ -74,36 +94,36 @@ impl CoreProcessor {
             .to_string()
     }
 
-    // Process the new file
-    // This is the main workflow for the CoreProcessor
-    fn launch_core_processor(&self) -> Result<(), Box<dyn Error>> {
-        // Setup duckdb table and print out the schema
+    // This is the main launch method for the CoreProcessor
+    fn launch_core_processor(&mut self) -> Result<(), Box<dyn Error>> {
         self.create_duckb_table()?;
         self.query_and_print_schema()?;
-        
-        // Determine if there are geometry columns
         let geom_columns = self.find_geometry_columns()?;
+
+        self.attach_postgres_db()?;
+        self.create_schema()?;
         
-        // Create and execute the appropriate strategy
-        // PostgisProcessor is the trait that both strategies implement
-        // Depending on whether there are geometry columns, the appropriate strategy is applied!
-        let strategy: Box<dyn PostgisProcessor> = if !geom_columns.is_empty() {
-            println!("Geometry columns found");
-            Box::new(GeoStrategy::new(geom_columns))
+        let schema_qualified_table = self.get_schema_qualified_table();
+        self.drop_existing_table(&schema_qualified_table)?;
+
+        if geom_columns.is_empty() {
+            let processor = NonGeoStrategy;
+            processor.process_data_into_postgis(self)?;
         } else {
-            println!("No geometry columns found");
-            Box::new(NonGeoStrategy)
-        };
-        
-        // Execute the chosen strategy
-        strategy.process_data_into_postgis(self)?;
-        
+            println!("Geometry columns found");
+            let processor = GeoStrategy::new(geom_columns);
+            processor.process_data_into_postgis(self)?;
+        }
+
         Ok(())
     }
 
     //TODO: Everything below here is common to all strategies and needs to be moved to a trait?
     // Attach the postgres database
     pub fn attach_postgres_db(&self) -> Result<(), Box<dyn Error>> {
+        // First, try to detach if it already exists
+        let _ = self.conn.execute("DETACH gridwalk_db;", []);
+
         self.conn.execute(
             &format!(
                 "ATTACH '{}' AS gridwalk_db (TYPE POSTGRES)",
@@ -146,7 +166,13 @@ impl CoreProcessor {
     }
 
     // Find the geometry columns
-    fn find_geometry_columns(&self) -> Result<Vec<String>, Box<dyn Error>> {
+    fn find_geometry_columns(&mut self) -> Result<Vec<String>, Box<dyn Error>> {
+        // For CSV/Excel files, look for coordinate pairs
+        if matches!(self.file_type, FileType::Csv | FileType::Excel) {
+            return self.find_coordinate_pairs();
+        }
+        
+        // For geospatial formats
         let query = "
         SELECT column_name, data_type
         FROM information_schema.columns
@@ -171,6 +197,77 @@ impl CoreProcessor {
         }
 
         Ok(geom_columns)
+    }
+
+    // New method to find coordinate pairs and store them
+    fn find_coordinate_pairs(&mut self) -> Result<Vec<String>, Box<dyn Error>> {
+        // Get all column names with original case
+        let query = "SELECT column_name FROM information_schema.columns WHERE table_name = 'data'";
+        let mut stmt = self.conn.prepare(query)?;
+        let mut rows = stmt.query([])?;
+        let mut columns = Vec::new();
+
+        while let Some(row) = rows.next()? {
+            let column_name: String = row.get(0)?;
+            columns.push(column_name);
+        }
+
+        let mut coordinate_pairs = Vec::new();
+
+        // Define coordinate pair patterns
+        let coordinate_patterns = [
+            ("x-coordinate", "y-coordinate"),
+            ("x_coordinate", "y_coordinate"),
+            ("longitude", "latitude"),
+            ("long", "lat"),
+            ("lng", "lat"),
+            ("lon", "lat"),
+            ("easting", "northing"),
+            ("east", "north"),
+            ("point_x", "point_y"),
+            ("pt_x", "pt_y"),
+            ("x_coord", "y_coord"),
+            ("xcoord", "ycoord"),
+            // Could delete this last pattern - probably not needed
+            ("x", "y"),
+        ];
+
+        // Look for matching patterns
+        for (x_pattern, y_pattern) in coordinate_patterns.iter() {
+            let x_col = columns.iter().find(|col| {
+                let col_lower = col.to_lowercase();
+                col_lower == *x_pattern || 
+                col_lower.contains(&format!("{}", x_pattern)) &&
+                (col_lower.contains("coord") || col_lower.contains("x"))
+            });
+            
+            let y_col = columns.iter().find(|col| {
+                let col_lower = col.to_lowercase();
+                col_lower == *y_pattern || 
+                col_lower.contains(&format!("{}", y_pattern)) &&
+                (col_lower.contains("coord") || col_lower.contains("y"))
+            });
+
+            if let (Some(x_name), Some(y_name)) = (x_col, y_col) {
+                println!("Found coordinate pair: {} (X) and {} (Y)", x_name, y_name);
+                
+                self.coordinate_columns = Some((x_name.clone(), y_name.clone()));
+                
+                let geom_name = format!("geom_from_{}_{}",
+                    x_name.replace("-", "_").replace(" ", "_").replace("(", "").replace(")", ""),
+                    y_name.replace("-", "_").replace(" ", "_").replace("(", "").replace(")", "")
+                );
+                
+                coordinate_pairs.push(geom_name);
+                break;
+            }
+        }
+
+        if coordinate_pairs.is_empty() {
+            println!("No coordinate pairs detected in CSV/Excel file");
+        }
+
+        Ok(coordinate_pairs)
     }
 
     // Find shapefile path if file is a zip
@@ -203,7 +300,24 @@ impl CoreProcessor {
         let mut buffer = Vec::new();
         file.seek(std::io::SeekFrom::Start(0))?;
         file.read_to_end(&mut buffer)?;
-        Self::detect_content_based_type(&buffer)
+        
+        // Try content-based detection for GeoJSON
+        if let Ok(file_type) = Self::detect_geojson(&buffer) {
+            return Ok(file_type);
+        }
+        
+        // Check file extension for CSV
+        // TODO: This is a hack and we should use the content-based detection instead?? Maybe change this in the future
+        let path = std::path::Path::new(file_path);
+        if let Some(extension) = path.extension() {
+            let ext = extension.to_string_lossy().to_lowercase();
+            if ext == "csv" {
+                println!("Detected CSV file by extension: {}", file_path);
+                return Ok(FileType::Csv);
+            }
+        }
+
+        Err("Unknown or unsupported file type".into())
     }
 
     fn match_magic_numbers(buffer: &[u8]) -> Option<FileType> {
@@ -227,15 +341,12 @@ impl CoreProcessor {
                     b"xl/calc",
                 ];
 
-                // Adjust shapefile patterns to match expected 4 elements
                 let shapefile_patterns: [&[u8]; 4] = [b".shp", b".dbf", b".prj", b".shx"];
 
-                // Check for Excel patterns first
                 let is_excel = excel_patterns
                     .iter()
                     .any(|&pattern| rest.windows(pattern.len()).any(|window| window == pattern));
 
-                // Check for Shapefile patterns
                 let is_shapefile = shapefile_patterns
                     .iter()
                     .any(|&pattern| rest.windows(pattern.len()).any(|window| window == pattern));
@@ -263,8 +374,7 @@ impl CoreProcessor {
         }
     }
 
-    fn detect_content_based_type(buffer: &[u8]) -> Result<FileType, Box<dyn Error>> {
-        // Try GeoJSON first
+    fn detect_geojson(buffer: &[u8]) -> Result<FileType, Box<dyn Error>> {
         if let Ok(text) = std::str::from_utf8(buffer) {
             let text_lower = text.trim_start().to_lowercase();
 
@@ -276,31 +386,9 @@ impl CoreProcessor {
             {
                 return Ok(FileType::Geojson);
             }
-
-            // Check for CSV last
-            if Self::is_valid_csv(text) {
-                return Ok(FileType::Csv);
-            }
         }
 
         Err("Unknown or unsupported file type".into())
-    }
-
-    fn is_valid_csv(content: &str) -> bool {
-        let lines: Vec<&str> = content.lines().take(5).collect();
-
-        if lines.len() < 2 {
-            return false;
-        }
-
-        let first_line_fields = lines[0].split(',').count();
-        // Require at least 2 columns and check for consistency
-        first_line_fields >= 2
-            && lines[1..].iter().all(|line| {
-                let fields = line.split(',').count();
-                fields == first_line_fields
-                    && line.chars().all(|c| c.is_ascii() || c.is_whitespace())
-            })
     }
 
     // Create the data table in duckdb
@@ -322,13 +410,13 @@ impl CoreProcessor {
             }
             FileType::Excel => {
                 format!(
-                    "CREATE TABLE data AS SELECT * FROM st_read('{}');",
+                    "CREATE TABLE data AS SELECT * FROM read_xlsx('{}');",
                     self.file_path
                 )
             }
             FileType::Csv => {
                 format!(
-                    "CREATE TABLE data AS SELECT * FROM read_csv('{}');",
+                    "CREATE TABLE data AS SELECT * FROM read_csv('{}', ignore_errors=true, header=true);",
                     self.file_path
                 )
             }
@@ -369,6 +457,10 @@ impl CoreProcessor {
     pub fn conn(&self) -> &Connection {
         &self.conn
     }
+
+    pub fn get_coordinate_columns(&self) -> Option<&(String, String)> {
+        self.coordinate_columns.as_ref()
+    }
 }
 
 /// Public function to process a file
@@ -378,32 +470,11 @@ pub fn process_file(
     postgis_uri: &str,
     schema_name: &str,
 ) -> Result<(), io::Error> {
-    let processor = CoreProcessor::create_core_processor(file_path, table_name, postgis_uri, schema_name)
-        .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("Error creating processor for '{}': {}", file_path, e),
-            )
-        })?;
+    let mut core_processor = CoreProcessor::create_core_processor(file_path, table_name, postgis_uri, schema_name)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Error creating processor for '{}': {}", file_path, e)))?;
 
-    println!(
-        "Detected file type: {:?} for file: '{}'",
-        processor.file_type, file_path
-    );
+    core_processor.launch_core_processor()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Error processing {} file '{}': {}", core_processor.file_type().to_string(), file_path, e)))?;
 
-    processor.launch_core_processor().map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!(
-                "Error processing {:?} file '{}': {}",
-                processor.file_type, file_path, e
-            ),
-        )
-    })?;
-
-    println!(
-        "Successfully loaded {:?} file: '{}'",
-        processor.file_type, file_path
-    );
     Ok(())
 }

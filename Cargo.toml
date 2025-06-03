@@ -1,6 +1,6 @@
 [package]
 name = "duckdb-postgis"
-version = "0.1.11"
+version = "0.2.0"
 edition = "2021"
 authors = ["chris@enmeshed.dev", "serj@enmeshed.dev"]
 description = "A library for transforming geospatial data using DuckDB and ingesting it into a PostGIS database."
@@ -14,13 +14,13 @@ name = "duckdb_postgis"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-duckdb = { version = "1.2.0", features = ["bundled"] }
+duckdb = { version = "1.2.2", features = ["bundled"] }
 lexical-core = "1.0.5"
-zip = "2.2.2"
+zip = "4.0.0"
 
 [dependencies.pyo3]
 git = "https://github.com/pyo3/pyo3"
-version = "0.23.5"
+version = "0.25.0"
 
 [features]
 extension-module = ["pyo3/extension-module"]

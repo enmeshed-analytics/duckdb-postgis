@@ -8,23 +8,24 @@ cargo add duckdb-postgis
 
 This now supports python and will soon be available on PyPi.
 
-## Current Release v0.1.11
+## Future Release v0.2.0 (Soon)
 
-### This Rust library does the following things
+- Reads in geospatial data file types (Geopackage, Shapefile, GeoJSON, Parquet) and automatically detects the file format using magic numbers and content analysis.
+- Reads in non-geospatial data (CSV, Excel) with automatic header detection and error handling.
+- Automatically detects coordinate pairs in CSV/Excel files by looking for common naming patterns (e.g., longitude/latitude, x/y, easting/northing) and converts them to geometry.
+- Performs CRS transformation on the data if required - ensures the CRS is ESPG:4326 (WGS84) for consistent spatial operations.
+- Loads the data into a PostGIS table with a correctly defined geometry column, handling both single and multi-geometry columns.
+- Provides a clean interface for both Rust and Python applications through Pyo3 bindings.
+- Uses DuckDB as an intermediate processing engine.
 
-- Reads in geospatial data file types (Geopackage, Shapefile, etc)
-- Reads in non geospatial data
-- Performs CRS transformation on the data if required - ensures the CRS is ESPG:4326
-- Loads the data into a PostGIS table with a correctly defined geometry column
+## Future Improvements post-v0.2.0
 
-### Improvements for release 0.1.12
+- Allow users to specify a target CRS instead of defaulting to EPSG:4326
+- Add support for more file formats and coordinate systems
+- Improve error handling and logging
+- Add support for batch processing multiple files
 
-- Handle raster data file format?
-- Discard rows where there may be errors in the geometry column / ensure the programme doesn't crash when a geometry error is encountered - skip over it and log it instead
-- There are still bugs for loading parquet files and handling some types of geometry columns due to how they are named - these will be fixed in the next release
-- Add flexibility for target CRS.
-
-### Example usage
+## Example usage
 
 ```rust
 mod duckdb_load;
