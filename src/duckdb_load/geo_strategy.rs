@@ -48,6 +48,7 @@ impl GeoStrategy {
             FileType::Csv | FileType::Excel => {
                 // TODO: maybe seperate out csv and excel to different routes
                 // TODO: need to do same CRS logic for csv and excel as for parquet
+                // DON'T JUST DEFAULT TO WGS84 - NEED TO INFER THE CRS FROM THE DATA
                 println!("CSV/Excel file detected, defaulting to WGS84 (EPSG:4326)");
                 Ok("4326".to_string())
             },
@@ -89,7 +90,7 @@ impl GeoStrategy {
     fn analyse_geometry_column(&self, core_processor: &CoreProcessor, geom_column: &str) -> Result<String, Box<dyn Error>> {
         println!("Analyzing geometry column: {}", geom_column);
         
-        let inspect_query = format!(
+        let inspect_data_query = format!(
             "SELECT typeof({}), length({}), {} IS NOT NULL as has_data 
              FROM data 
              WHERE {} IS NOT NULL 
@@ -98,29 +99,36 @@ impl GeoStrategy {
         );
         
         println!("Inspecting column data...");
-        let mut stmt = core_processor.conn().prepare(&inspect_query)?;
+        let mut stmt = core_processor.conn().prepare(&inspect_data_query)?;
         let mut rows = stmt.query([])?;
         
-        while let Some(row) = rows.next()? {
-            let data_type: String = row.get(0)?;
-            let data_length: i64 = row.get(1)?;
-            let has_data: bool = row.get(2)?;
-            println!("  Type: {}, Length: {}, Has data: {}", data_type, data_length, has_data);
+        match rows.next()? {
+            Some(row) => {
+                let data_type: String = row.get(0)?;
+                let data_length: i64 = row.get(1)?;
+                let has_data: bool = row.get(2)?;
+                println!("  Type: {}, Length: {}, Has data: {}", data_type, data_length, has_data);
+                
+                // Now we know there's data, try extraction methods
+                if let Ok(crs) = self.try_direct_wkb_extraction(core_processor, geom_column) {
+                    return Ok(crs);
+                }
+                
+                if let Ok(crs) = self.try_hex_wkb_extraction(core_processor, geom_column) {
+                    return Ok(crs);
+                }
+                
+                if let Ok(crs) = self.try_direct_text_extraction(core_processor, geom_column) {
+                    return Ok(crs);
+                }
+                
+                Err("No valid coordinates found in geometry column".into())
+            }
+            None => {
+                // No rows returned - column has no non-null geometry data
+                Err(format!("Geometry column '{}' contains no valid data", geom_column).into())
+            }
         }
-        
-        if let Ok(crs) = self.try_direct_wkb_extraction(core_processor, geom_column) {
-            return Ok(crs);
-        }
-        
-        if let Ok(crs) = self.try_hex_wkb_extraction(core_processor, geom_column) {
-            return Ok(crs);
-        }
-        
-        if let Ok(crs) = self.try_direct_text_extraction(core_processor, geom_column) {
-            return Ok(crs);
-        }
-        
-        Err("No valid coordinates found in geometry column".into())
     }
 
     /// Try extracting coordinates assuming WKB format
@@ -216,6 +224,7 @@ impl GeoStrategy {
         Ok(inferred_crs)
     }
 
+    // logic to guess the CRS from the coordinate ranges
     fn infer_crs_from_ranges(&self, x_min: f64, x_max: f64, y_min: f64, y_max: f64) -> Result<String, Box<dyn Error>> {
         // WGS84 (EPSG:4326)
         if x_min >= -180.0 && x_max <= 180.0 && y_min >= -90.0 && y_max <= 90.0 {
@@ -231,7 +240,7 @@ impl GeoStrategy {
             }
         }
         
-        // Web Mercator (EPSG:3857) - Common web mapping projection
+        // Web Mercator (EPSG:3857)
         if x_min >= -20037508.0 && x_max <= 20037508.0 && y_min >= -20037508.0 && y_max <= 20037508.0 {
             if (x_max - x_min) > 10000.0 || (y_max - y_min) > 10000.0 {
                 return Ok("3857".to_string());
@@ -251,50 +260,54 @@ impl GeoStrategy {
         let current_crs = self.get_crs_number(core_processor)?;
         println!("Current CRS for all columns: {}", current_crs);
         
-        // Handle CSV/Excel files differently
-        if matches!(core_processor.file_type(), FileType::Csv | FileType::Excel) {
-            return self.transform_coordinate_pairs(core_processor, &current_crs, target_crs);
-        }
-        
-        // Existing logic for geospatial file formats
-        let mut select_parts = Vec::new();
-        
-        select_parts.push("* EXCLUDE (".to_string());
-        let excluded_columns: Vec<String> = self.geom_columns.iter()
-            .map(|col| format!("\"{}\"", col))
-            .collect();
-        select_parts.push(excluded_columns.join(", "));
-        select_parts.push(")".to_string());
-        
-        for column in &self.geom_columns {
-            if current_crs == target_crs {
-                select_parts.push(format!(
-                    ", ST_AsText(\"{}\") as \"{}_wkt\"",
-                    column, column
-                ));
-            } else {
-                select_parts.push(format!(
-                    ", ST_AsText(ST_Transform(\"{}\", 'EPSG:{}', 'EPSG:{}', always_xy := true)) AS \"{}_wkt\"",
-                    column, current_crs, target_crs, column
-                ));
+        match core_processor.file_type() {
+            FileType::Csv | FileType::Excel => {
+                // Handle CSV/Excel files with coordinate pairs
+                // CURRENTLY ASSUMES THAT CSVS AND EXCEL ONLY EVER HAVE 1 GEOMETRY COLUMN
+                self.transform_coordinate_pairs(core_processor, &current_crs, target_crs)
+            }
+            FileType::Geopackage | FileType::Shapefile | FileType::Geojson | FileType::Parquet => {
+                // Process other geospatial file formats
+                let mut cols_to_keep = Vec::new();
+                
+                cols_to_keep.push("* EXCLUDE (".to_string());
+                let excluded_columns: Vec<String> = self.geom_columns.iter()
+                    .map(|col| format!("\"{}\"", col))
+                    .collect();
+                cols_to_keep.push(excluded_columns.join(", "));
+                cols_to_keep.push(")".to_string());
+                
+                for column in &self.geom_columns {
+                    if current_crs == target_crs {
+                        cols_to_keep.push(format!(
+                            ", ST_AsText(\"{}\") as \"{}_wkt\"",
+                            column, column
+                        ));
+                    } else {
+                        cols_to_keep.push(format!(
+                            ", ST_AsText(ST_Transform(\"{}\", 'EPSG:{}', 'EPSG:{}', always_xy := true)) AS \"{}_wkt\"",
+                            column, current_crs, target_crs, column
+                        ));
+                    }
+                }
+                
+                let create_table_query = format!(
+                    "CREATE TABLE transformed_data AS SELECT {} FROM data;",
+                    cols_to_keep.join("")
+                );
+                
+                println!("Creating transformed_data table...");
+                core_processor.conn().execute(&create_table_query, [])?;
+                
+                if current_crs == target_crs {
+                    println!("All geometry columns already in target CRS ({}). Converted to WKT.", target_crs);
+                } else {
+                    println!("Transformed all geometry columns from EPSG:{} to EPSG:{} and converted to WKT.", current_crs, target_crs);
+                }
+                
+                Ok(())
             }
         }
-        
-        let create_table_query = format!(
-            "CREATE TABLE transformed_data AS SELECT {} FROM data;",
-            select_parts.join("")
-        );
-        
-        println!("Creating transformed_data table...");
-        core_processor.conn().execute(&create_table_query, [])?;
-        
-        if current_crs == target_crs {
-            println!("All geometry columns already in target CRS ({}). Converted to WKT.", target_crs);
-        } else {
-            println!("Transformed all geometry columns from EPSG:{} to EPSG:{} and converted to WKT.", current_crs, target_crs);
-        }
-        
-        Ok(())
     }
 
     /// Handle coordinate pairs for CSV/Excel files
@@ -334,13 +347,8 @@ impl PostgisProcessor for GeoStrategy {
     fn process_data_into_postgis(&self, core_processor: &CoreProcessor) -> Result<(), Box<dyn Error>> {
         println!("LOADING GEOSPATIAL DATA");
         
-        core_processor.attach_postgres_db()?;
-        core_processor.create_schema()?;
-        
-        let schema_qualified_table = core_processor.get_schema_qualified_table();
-        core_processor.drop_existing_table(&schema_qualified_table)?;
-        
         self.transform_geom_columns(core_processor)?;
+        let schema_qualified_table = core_processor.get_schema_qualified_table();
         
         let create_table_query = format!(
             "CREATE TABLE gridwalk_db.{} AS SELECT * FROM transformed_data;",
@@ -351,10 +359,10 @@ impl PostgisProcessor for GeoStrategy {
         
         let mut postgis_queries = Vec::new();
         
-
         for geom_column in &self.geom_columns {
             let target_crs = "4326";
-            // Good idea here to actually handle errors better when there are errors - usually incorrect data in the wkt column
+            // Good idea here to actually handle errors better when there are errors
+            // There is sometimes incorrect data in the wkt column
             let postgis_query = format!(
                 "ALTER TABLE {} ADD COLUMN \"{}\" geometry;
                 

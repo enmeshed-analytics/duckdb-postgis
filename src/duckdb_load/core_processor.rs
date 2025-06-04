@@ -85,7 +85,6 @@ impl CoreProcessor {
 
     // Clean the table name so that the extension is removed
     fn clean_table_name(table_name: &str) -> String {
-        // Remove file extension and any leading/trailing whitespace - needed for the front end to display the table name
         table_name
             .rsplit_once('.')
             .map(|(name, _)| name)
@@ -121,8 +120,6 @@ impl CoreProcessor {
     //TODO: Everything below here is common to all strategies and needs to be moved to a trait?
     // Attach the postgres database
     pub fn attach_postgres_db(&self) -> Result<(), Box<dyn Error>> {
-        // First, try to detach if it already exists
-        let _ = self.conn.execute("DETACH gridwalk_db;", []);
 
         self.conn.execute(
             &format!(
@@ -131,6 +128,7 @@ impl CoreProcessor {
             ),
             [],
         )?;
+        println!("Attached postgres database: {}", self.postgis_uri);
         Ok(())
     }
 

@@ -8,7 +8,7 @@ A Rust Library for writing geospatial/non-geospatial data to Postgis using DuckD
 
 ---
 
-## Current Release v0.1.11
+## Current Release v0.2.0
 
 This now supports python and will soon be available on PyPi.
 
@@ -17,8 +17,6 @@ cargo add duckdb-postgis
 ```
 
 This now supports python and will soon be available on PyPi.
-
-## Future Release v0.2.0 (Soon)
 
 - Reads in geospatial data file types (Geopackage, Shapefile, GeoJSON, Parquet) and automatically detects the file format using magic numbers and content analysis.
 - Reads in non-geospatial data (CSV, Excel) with automatic header detection and error handling.
@@ -34,6 +32,7 @@ This now supports python and will soon be available on PyPi.
 - Add support for more file formats and coordinate systems
 - Improve error handling and logging
 - Add support for batch processing multiple files
+- Expand the range of file formats supported
 
 ## Example usage
 
