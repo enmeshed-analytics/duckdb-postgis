@@ -8,7 +8,7 @@ A Rust Library for writing geospatial/non-geospatial data to Postgis using DuckD
 
 ---
 
-## Current Release v0.2.0
+## Current Release v0.2.1
 
 This now supports python and will soon be available on PyPi.
 
