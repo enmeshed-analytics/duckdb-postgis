@@ -361,8 +361,9 @@ impl PostgisProcessor for GeoStrategy {
         
         for geom_column in &self.geom_columns {
             let target_crs = "4326";
-            // Good idea here to actually handle errors better when there are errors
-            // There is sometimes incorrect data in the wkt column
+            // Use exception handling to return NULL for invalid WKT data
+            // Still need to filter these out of the final where clause!
+            // Otherwise, we'll get an error when the frontend tries to display on the map
             let postgis_query = format!(
                 "ALTER TABLE {} ADD COLUMN \"{}\" geometry;
                 
@@ -376,7 +377,10 @@ impl PostgisProcessor for GeoStrategy {
                  END;
                  $$ LANGUAGE plpgsql;
                  
-                 UPDATE {} SET \"{}\" = safe_geom_from_text(\"{}_wkt\", {});
+                 UPDATE {} 
+                 SET \"{}\" = safe_geom_from_text(\"{}_wkt\", {})
+                 WHERE \"{}_wkt\" IS NOT NULL 
+                   AND \"{}_wkt\" != '';
                  
                  DROP FUNCTION safe_geom_from_text(TEXT, INTEGER);
                  ALTER TABLE {} DROP COLUMN \"{}_wkt\";",
@@ -386,8 +390,10 @@ impl PostgisProcessor for GeoStrategy {
                 geom_column,                   // 4. SET column
                 geom_column,                   // 5. safe_geom_from_text wkt column
                 target_crs,                    // 6. safe_geom_from_text srid
-                schema_qualified_table,        // 7. DROP ALTER TABLE
-                geom_column                    // 8. DROP COLUMN
+                geom_column,                   // 7. WHERE wkt column (first check)
+                geom_column,                   // 8. WHERE wkt column (second check)
+                schema_qualified_table,        // 9. DROP ALTER TABLE
+                geom_column,                   // 10. DROP COLUMN wkt column
             );
             
             postgis_queries.push(postgis_query);
