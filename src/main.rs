@@ -7,7 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "/Users/cmcarlon/Downloads/osopenusrn_202505_gpkg/osopenusrn_202505.gpkg",
         "PARQUETTEST",
         "postgresql://admin:password@localhost:5432/gridwalk",
-        "CHRIS",
+        "POTTERPOTTER",
     )?;
     Ok(())
 }

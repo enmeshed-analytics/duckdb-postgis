@@ -280,12 +280,12 @@ impl GeoStrategy {
                 for column in &self.geom_columns {
                     if current_crs == target_crs {
                         cols_to_keep.push(format!(
-                            ", ST_AsText(\"{}\") as \"{}_wkt\"",
+                            ", ST_AsText(ST_Force2D(\"{}\")) as \"{}_wkt\"",
                             column, column
                         ));
                     } else {
                         cols_to_keep.push(format!(
-                            ", ST_AsText(ST_Transform(\"{}\", 'EPSG:{}', 'EPSG:{}', always_xy := true)) AS \"{}_wkt\"",
+                            ", ST_AsText(ST_Force2D(ST_Transform(\"{}\", 'EPSG:{}', 'EPSG:{}', always_xy := true))) AS \"{}_wkt\"",
                             column, current_crs, target_crs, column
                         ));
                     }
@@ -319,7 +319,7 @@ impl GeoStrategy {
             format!(
                 "CREATE TABLE transformed_data AS 
                  SELECT *, 
-                        ST_AsText(ST_Point(\"{}\", \"{}\")) as geom_wkt 
+                        ST_AsText(ST_Force2D(ST_Point(\"{}\", \"{}\"))) as geom_wkt 
                  FROM data 
                  WHERE \"{}\" IS NOT NULL AND \"{}\" IS NOT NULL;",
                 x_col, y_col, x_col, y_col
@@ -328,7 +328,7 @@ impl GeoStrategy {
             format!(
                 "CREATE TABLE transformed_data AS 
                  SELECT *, 
-                        ST_AsText(ST_Transform(ST_Point(\"{}\", \"{}\"), 'EPSG:{}', 'EPSG:{}', always_xy := true)) as geom_wkt 
+                        ST_AsText(ST_Force2D(ST_Transform(ST_Point(\"{}\", \"{}\"), 'EPSG:{}', 'EPSG:{}', always_xy := true))) as geom_wkt 
                  FROM data 
                  WHERE \"{}\" IS NOT NULL AND \"{}\" IS NOT NULL;",
                 x_col, y_col, current_crs, target_crs, x_col, y_col
