@@ -214,6 +214,7 @@ impl CoreProcessor {
 
         // Define coordinate pair patterns
         let coordinate_patterns = [
+            ("X-coordinate", "Y-coordinate"),
             ("x-coordinate", "y-coordinate"),
             ("x_coordinate", "y_coordinate"),
             ("longitude", "latitude"),

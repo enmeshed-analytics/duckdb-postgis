@@ -315,23 +315,27 @@ impl GeoStrategy {
         let (x_col, y_col) = core_processor.get_coordinate_columns()
             .ok_or("No coordinate columns detected")?;
         
+        // Get the geometry column name (should be the first and only one for CSV/Excel)
+        let geom_column = self.geom_columns.first()
+            .ok_or("No geometry column found for coordinate pair")?;
+        
         let create_table_query = if current_crs == target_crs {
             format!(
                 "CREATE TABLE transformed_data AS 
                  SELECT *, 
-                        ST_AsText(ST_Force2D(ST_Point(\"{}\", \"{}\"))) as geom_wkt 
+                        ST_AsText(ST_Force2D(ST_Point(\"{}\", \"{}\"))) as \"{}_wkt\" 
                  FROM data 
                  WHERE \"{}\" IS NOT NULL AND \"{}\" IS NOT NULL;",
-                x_col, y_col, x_col, y_col
+                x_col, y_col, geom_column, x_col, y_col
             )
         } else {
             format!(
                 "CREATE TABLE transformed_data AS 
                  SELECT *, 
-                        ST_AsText(ST_Force2D(ST_Transform(ST_Point(\"{}\", \"{}\"), 'EPSG:{}', 'EPSG:{}', always_xy := true))) as geom_wkt 
+                        ST_AsText(ST_Force2D(ST_Transform(ST_Point(\"{}\", \"{}\"), 'EPSG:{}', 'EPSG:{}', always_xy := true))) as \"{}_wkt\" 
                  FROM data 
                  WHERE \"{}\" IS NOT NULL AND \"{}\" IS NOT NULL;",
-                x_col, y_col, current_crs, target_crs, x_col, y_col
+                x_col, y_col, current_crs, target_crs, geom_column, x_col, y_col
             )
         };
         
