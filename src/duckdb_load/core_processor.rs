@@ -286,7 +286,7 @@ impl CoreProcessor {
     }
 
     // Determine the file type based on the magic numbers
-    fn determine_file_type(file_path: &str) -> Result<FileType, Box<dyn Error>> {
+    pub fn determine_file_type(file_path: &str) -> Result<FileType, Box<dyn Error>> {
         let mut file = File::open(file_path)?;
         let mut header_buffer = [0u8; 150];
         let bytes_read = file.read(&mut header_buffer)?;

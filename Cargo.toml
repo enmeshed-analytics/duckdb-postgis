@@ -16,6 +16,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 duckdb = { version = "1.2.2", features = ["bundled"] }
 lexical-core = "1.0.5"
+tempfile = "3.20.0"
 zip = "4.0.0"
 
 [dependencies.pyo3]
