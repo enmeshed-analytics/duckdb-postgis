@@ -8,7 +8,7 @@ A Rust Library for writing geospatial/non-geospatial data to Postgis using DuckD
 
 ---
 
-## Current Release v0.2.1
+## Current Release v0.2.2
 
 This now supports python and will soon be available on PyPi.
 
@@ -26,7 +26,7 @@ This now supports python and will soon be available on PyPi.
 - Provides a clean interface for both Rust and Python applications through Pyo3 bindings.
 - Uses DuckDB as an intermediate processing engine.
 
-## Future Improvements post-v0.2.0
+## Future Improvements
 
 - Allow users to specify a target CRS instead of defaulting to EPSG:4326
 - Add support for more file formats and coordinate systems
