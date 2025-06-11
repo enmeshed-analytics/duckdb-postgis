@@ -15,7 +15,7 @@ revert:   Reverts a previous commit
 endef
 export COMMIT_TYPES
 
-repo-update: git-add git-commit git-push
+update: git-add git-commit git-push
 
 git-add:
 	git add .
