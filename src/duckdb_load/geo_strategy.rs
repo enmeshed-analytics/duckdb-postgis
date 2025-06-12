@@ -109,7 +109,7 @@ impl GeoStrategy {
                 let has_data: bool = row.get(2)?;
                 println!("  Type: {}, Length: {}, Has data: {}", data_type, data_length, has_data);
                 
-                // Now we know there's data, try extraction methods
+                // Now we know there's data, try extraction methods...
                 if let Ok(crs) = self.try_direct_wkb_extraction(core_processor, geom_column) {
                     return Ok(crs);
                 }
