@@ -10,7 +10,7 @@ pub struct NonGeoStrategy;
 
 impl PostgisProcessor for NonGeoStrategy {
     fn process_data_into_postgis(&self, core_processor: &CoreProcessor) -> Result<(), Box<dyn Error>> {
-        println!("LOADING NON GEOSPATIAL DATA");
+        println!("Loading Non-Geospatial Data");
 
         let schema_qualified_table = core_processor.get_schema_qualified_table();
         let create_table_query = &format!(

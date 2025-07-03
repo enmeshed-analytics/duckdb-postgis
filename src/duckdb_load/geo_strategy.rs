@@ -349,7 +349,7 @@ impl GeoStrategy {
 
 impl PostgisProcessor for GeoStrategy {
     fn process_data_into_postgis(&self, core_processor: &CoreProcessor) -> Result<(), Box<dyn Error>> {
-        println!("LOADING GEOSPATIAL DATA");
+        println!("Loading Geospatial Data");
         
         self.transform_geom_columns(core_processor)?;
         let schema_qualified_table = core_processor.get_schema_qualified_table();
@@ -359,7 +359,6 @@ impl PostgisProcessor for GeoStrategy {
             schema_qualified_table
         );
         core_processor.conn().execute(&create_table_query, [])?;
-        println!("Data copied to PostgreSQL table: {}", schema_qualified_table);
         
         let mut postgis_queries = Vec::new();
         
@@ -412,8 +411,6 @@ impl PostgisProcessor for GeoStrategy {
             "CALL postgres_execute('gridwalk_db', '{}');",
             combined_query.replace("'", "''")
         );
-        
-        println!("PostGIS Query: {}", postgres_execute_query);
         
         core_processor.conn().execute(&postgres_execute_query, [])?;
         

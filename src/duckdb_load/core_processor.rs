@@ -109,7 +109,6 @@ impl CoreProcessor {
             let processor = NonGeoStrategy;
             processor.process_data_into_postgis(self)?;
         } else {
-            println!("Geometry columns found");
             let processor = GeoStrategy::new(geom_columns);
             processor.process_data_into_postgis(self)?;
         }
@@ -128,7 +127,6 @@ impl CoreProcessor {
             ),
             [],
         )?;
-        println!("Attached postgres database: {}", self.postgis_uri);
         Ok(())
     }
 
@@ -178,8 +176,8 @@ impl CoreProcessor {
         AND (
             data_type = 'GEOMETRY'
             OR (data_type = 'BLOB' AND (column_name LIKE '%geo%' OR column_name LIKE '%geom%'))
-            OR column_name LIKE '%geom%'
-            OR column_name LIKE '%geometry%'
+            OR (data_type != 'DOUBLE' AND data_type != 'INTEGER' AND data_type != 'VARCHAR' 
+                AND (column_name LIKE '%geom%' OR column_name = 'geometry'))
         )";
 
         let mut stmt = self.conn.prepare(query)?;
@@ -188,7 +186,6 @@ impl CoreProcessor {
 
         while let Some(row) = rows.next()? {
             let column_name: String = row.get(0)?;
-            println!("Geometry column name: {}", column_name);
             if column_name != "gdb_geomattr_data" {
                 geom_columns.push(column_name);
             }

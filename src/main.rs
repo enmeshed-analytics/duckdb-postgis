@@ -4,10 +4,10 @@ use duckdb_load::core_processor::process_file;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     process_file(
-        "[insert file path here]",
-        "[insert table name here]",
-        "[insert postgres uri here]",
-        "[insert schema name here]",
+        "/Users/cmcarlon/Downloads/OS_Open_Built_Up_Areas_GeoPackage/os_open_built_up_areas.gpkg",
+        "os_open_built_up_areas",
+        "postgresql://admin:password@localhost:5432/gridwalk",
+        "public",
     )?;
     Ok(())
 }
