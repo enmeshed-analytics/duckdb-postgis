@@ -8,7 +8,7 @@ A Rust Library for writing geospatial/non-geospatial data to Postgis using DuckD
 
 ---
 
-## Current Release v0.2.5
+## Current Release v0.2.6
 
 ```bash
 cargo add duckdb-postgis
